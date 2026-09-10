@@ -1,6 +1,6 @@
 //=============================================================================
 // NavArrow.js — Visual Navigation Arrow for RPG Maker MV
-// Author  : Custom
+// Author  : Harleythetech
 // Version : 1.1.0
 //=============================================================================
 /*:
@@ -8,7 +8,7 @@
  * toward a target map coordinate or event. Auto-hides on map transfer,
  * during cutscenes/messages, and during scene transitions.
  *
- * @author Custom
+ * @author Harleythetech
  *
  * ─── APPEARANCE ──────────────────────────────────────────────────────────────
  * @param Arrow Color

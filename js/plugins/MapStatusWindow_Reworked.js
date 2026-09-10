@@ -12,24 +12,20 @@ Yanfly.MapStatus = Yanfly.MapStatus || {};
 Yanfly.MapStatus.version = 3.4;
 
 /*:
- * @plugindesc v3.40 Dual-window HUD with rounded translucent glass cards and cushioned padding.
+ * @plugindesc v3.40 Dual-window HUD with rounded translucent glass cards.
  * @author Yanfly Engine Plugins / Reworked HUD
  *
- * @param Auto Open
- * @desc Automatically show the map status HUD when entering a map.
- * @default true
- *
  * @param Window X
- * @desc The X position formula of the HUD.
- * @default Graphics.boxWidth - 320 - 16
+ * @desc X position of the HUD. Use a formula or number.
+ * @default Graphics.boxWidth - 330 - 16
  *
  * @param Window Y
- * @desc The Y position of the HUD.
- * @default 16
+ * @desc Y position (pixels from top) of the HUD.
+ * @default 10
  *
  * @param Window Width
- * @desc Width of the status windows.
- * @default 320
+ * @desc Width in pixels of the status windows.
+ * @default 330
  *
  * @help
  * ============================================================================
@@ -39,22 +35,15 @@ Yanfly.MapStatus.version = 3.4;
  * CloseMapStatusWindow     - Closes the HUDs.
  * ToggleMapStatusWindow    - Toggles the HUDs.
  * RefreshMapStatusWindow   - Refreshes both HUDs immediately.
- * SetMapStatusWindowX n    - Sets the HUD X position.
- * SetMapStatusWindowY n    - Sets the HUD Y position.
  */
 
-Yanfly.Parameters = PluginManager.parameters("YEP_MapStatusWindow");
+Yanfly.Parameters = PluginManager.parameters("MapStatusWindow_Reworked");
 Yanfly.Param = Yanfly.Param || {};
 
-Yanfly.Param.MapStatusAutoOpen =
-  String(Yanfly.Parameters["Auto Open"] || "true") === "true";
-Yanfly.Param.MapStatusWinX = String(
-  Yanfly.Parameters["Window X"] || "Graphics.boxWidth - 320 - 16",
-);
-Yanfly.Param.MapStatusWinY = String(Yanfly.Parameters["Window Y"] || "16");
-Yanfly.Param.MapStatusWinWidth = Number(
-  Yanfly.Parameters["Window Width"] || 320,
-);
+Yanfly.Param.MapStatusWinX     = String(Yanfly.Parameters["Window X"]     || "Graphics.boxWidth - 330 - 16");
+Yanfly.Param.MapStatusWinY     = Number(Yanfly.Parameters["Window Y"]     || 10);
+Yanfly.Param.MapStatusWinWidth = Number(Yanfly.Parameters["Window Width"] || 330);
+Yanfly.Param.MapStatusAutoOpen = true;
 
 //=============================================================================
 // Canvas Helpers: Rounded Rectangles
@@ -125,28 +114,15 @@ Game_System.prototype.initialize = function () {
 };
 
 Game_System.prototype.initMapStatusWindowSettings = function () {
-  this._mapStatusWindowX = Yanfly.Param.MapStatusWinX;
-  this._mapStatusWindowY = Yanfly.Param.MapStatusWinY;
-};
-
-Game_System.prototype.getMapStatusWindowX = function () {
-  if (this._mapStatusWindowX === undefined) this.initMapStatusWindowSettings();
-  return this._mapStatusWindowX;
+  // No per-save overrides — position is always driven by plugin params.
 };
 
 Game_System.prototype.getMapStatusWindowY = function () {
-  if (this._mapStatusWindowY === undefined) this.initMapStatusWindowSettings();
-  return this._mapStatusWindowY;
+  return Yanfly.Param.MapStatusWinY;
 };
 
-Game_System.prototype.setMapStatusWindowX = function (str) {
-  if (this._mapStatusWindowX === undefined) this.initMapStatusWindowSettings();
-  this._mapStatusWindowX = str;
-};
-
-Game_System.prototype.setMapStatusWindowY = function (str) {
-  if (this._mapStatusWindowY === undefined) this.initMapStatusWindowSettings();
-  this._mapStatusWindowY = str;
+Game_System.prototype.setMapStatusWindowY = function (val) {
+  // No-op: Y is controlled by plugin param only.
 };
 
 //=============================================================================
@@ -192,26 +168,10 @@ Game_Interpreter.prototype.pluginCommand = function (command, args) {
   } else if (command === "RefreshMapStatusWindow") {
     if (SceneManager._scene instanceof Scene_Map)
       SceneManager._scene.refreshMapStatusWindow();
-  } else if (command === "SetMapStatusWindowX") {
-    if (SceneManager._scene instanceof Scene_Map) {
-      var codeX = this.argsToString(args);
-      $gameSystem.setMapStatusWindowX(codeX);
-      SceneManager._scene.updateHUDPositions();
-    }
-  } else if (command === "SetMapStatusWindowY") {
-    if (SceneManager._scene instanceof Scene_Map) {
-      var codeY = this.argsToString(args);
-      $gameSystem.setMapStatusWindowY(codeY);
-      SceneManager._scene.updateHUDPositions();
-    }
   }
 };
 
-Game_Interpreter.prototype.argsToString = function (args) {
-  var str = "";
-  for (var i = 0; i < args.length; ++i) str += args[i] + " ";
-  return str.trim();
-};
+
 
 //=============================================================================
 // Helper: Draw Custom Gauge with Embedded Text
@@ -560,21 +520,10 @@ Scene_Map.prototype.createMapStatusWindow = function () {
 };
 
 Scene_Map.prototype.updateHUDPositions = function () {
-  var defaultX = Graphics.boxWidth - Yanfly.Param.MapStatusWinWidth - 16;
-  var posX = defaultX;
-  var posY = 16;
+  var posX = Graphics.boxWidth - Yanfly.Param.MapStatusWinWidth - 16;
+  var posY = Yanfly.Param.MapStatusWinY;
 
-  try {
-    posX = eval($gameSystem.getMapStatusWindowX());
-  } catch (e) {
-    posX = defaultX;
-  }
-  try {
-    posY = eval($gameSystem.getMapStatusWindowY());
-  } catch (e) {
-    posY = 16;
-  }
-
+  try { posX = eval(Yanfly.Param.MapStatusWinX); } catch (e) {}
   if (this._statusWindow) {
     this._statusWindow.x = posX;
     this._statusWindow.y = posY;

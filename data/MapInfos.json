@@ -1,11 +1,11 @@
 [
 null,
-null,
-{"id":2,"expanded":true,"name":"[START] Tutorial Map","order":1,"parentId":0,"scrollX":811,"scrollY":495},
-{"id":3,"expanded":false,"name":"Book Scene","order":2,"parentId":2,"scrollX":556.6666666666666,"scrollY":614},
-null,
-{"id":5,"expanded":false,"name":"Stone Cave","order":3,"parentId":0,"scrollX":922,"scrollY":800},
-{"id":6,"expanded":false,"name":"Slum","order":4,"parentId":0,"scrollX":1622,"scrollY":990},
-{"id":7,"expanded":true,"name":"Trading City","order":5,"parentId":0,"scrollX":1390.2857142857142,"scrollY":1117.7142857142856},
-{"id":8,"expanded":false,"name":"Abandoned School","order":6,"parentId":0,"scrollX":1404,"scrollY":797.1428571428571}
+{"id":1,"expanded":false,"name":"Weapon Shop","order":3,"parentId":2,"scrollX":540.6666666666666,"scrollY":314},
+{"id":2,"expanded":true,"name":"[START] Tutorial Map","order":1,"parentId":0,"scrollX":1404,"scrollY":797.1428571428571},
+{"id":3,"expanded":false,"name":"Book Scene","order":2,"parentId":2,"scrollX":540.6666666666666,"scrollY":314},
+{"id":4,"expanded":false,"name":"Item Shop","order":4,"parentId":2,"scrollX":540.6666666666666,"scrollY":410},
+{"id":5,"expanded":false,"name":"Stone Cave","order":5,"parentId":0,"scrollX":1056,"scrollY":800},
+{"id":6,"expanded":false,"name":"Slum","order":6,"parentId":0,"scrollX":1040,"scrollY":640},
+{"id":7,"expanded":true,"name":"Trading City","order":7,"parentId":0,"scrollX":1390.2857142857142,"scrollY":971.9999999999999},
+{"id":8,"expanded":false,"name":"Abandoned School","order":8,"parentId":0,"scrollX":1404,"scrollY":797.1428571428571}
 ]
