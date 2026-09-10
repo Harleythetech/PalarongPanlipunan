@@ -2698,16 +2698,14 @@ Graphics._createFontLoader = function(name) {
  * @private
  */
 Graphics._centerElement = function(element) {
-    var width = element.width * this._realScale;
+    var width  = element.width  * this._realScale;
     var height = element.height * this._realScale;
-    element.style.position = 'absolute';
-    element.style.margin = 'auto';
-    element.style.top = 0;
-    element.style.left = 0;
-    element.style.right = 0;
-    element.style.bottom = 0;
-    element.style.width = width + 'px';
-    element.style.height = height + 'px';
+    element.style.position  = 'fixed';
+    element.style.margin    = '0';
+    element.style.left      = Math.floor((window.innerWidth  - width)  / 2) + 'px';
+    element.style.top       = Math.floor((window.innerHeight - height) / 2) + 'px';
+    element.style.width     = width  + 'px';
+    element.style.height    = height + 'px';
 };
 
 /**
