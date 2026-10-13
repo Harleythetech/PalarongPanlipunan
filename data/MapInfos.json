@@ -22,7 +22,13 @@ null,
 {"id":20,"expanded":false,"name":"INTRO","order":13,"parentId":2,"scrollX":832,"scrollY":640},
 {"id":21,"expanded":false,"name":"INTRO 2","order":14,"parentId":20,"scrollX":832,"scrollY":640},
 {"id":22,"expanded":false,"name":"Francisco_Dagohoy","order":7,"parentId":6,"scrollX":816,"scrollY":1212},
-{"id":23,"expanded":true,"name":"MAP023","order":8,"parentId":6,"scrollX":819,"scrollY":457},
-{"id":24,"expanded":true,"name":"labas ng bahay ni kanor:","order":9,"parentId":23,"scrollX":832,"scrollY":640},
-{"id":25,"expanded":false,"name":"labas ng bahay ni kanor:","order":10,"parentId":24,"scrollX":819,"scrollY":457}
+{"id":23,"expanded":false,"name":"MAP023","order":8,"parentId":6,"scrollX":819,"scrollY":457},
+{"id":24,"expanded":false,"name":"labas ng bahay ni kanor:","order":9,"parentId":23,"scrollX":819,"scrollY":457},
+{"id":25,"expanded":true,"name":"labas ng bahay ni kanor:","order":10,"parentId":24,"scrollX":832,"scrollY":640},
+{"id":26,"expanded":true,"name":"Forest","order":15,"parentId":1,"scrollX":811,"scrollY":983},
+{"id":27,"expanded":true,"name":"Lost Forest","order":16,"parentId":26,"scrollX":1753,"scrollY":2431},
+{"id":28,"expanded":false,"name":"MAP028","order":11,"parentId":25,"scrollX":832,"scrollY":640},
+{"id":29,"expanded":true,"name":"Mountain Village","order":17,"parentId":27,"scrollX":1223,"scrollY":1663},
+{"id":30,"expanded":true,"name":"Village House 1F","order":18,"parentId":29,"scrollX":819,"scrollY":457},
+{"id":31,"expanded":false,"name":"MAP031","order":19,"parentId":30,"scrollX":819,"scrollY":457}
 ]
