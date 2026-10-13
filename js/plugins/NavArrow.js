@@ -80,6 +80,15 @@
  *       the target. Set to 0 to never auto-hide.
  * @default 2
  *
+ * @param Debug Logging
+ * @text Debug Logging
+ * @type boolean
+ * @on  Enable
+ * @off Disable
+ * @default false
+ * @desc Log arrow show/hide and target updates to the console.
+ *       Requires RPGReloaded Master Debug to also be ON.
+ *
  * ─── HELP ─────────────────────────────────────────────────────────────────────
  * @help
  * ============================================================================

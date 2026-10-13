@@ -41,7 +41,12 @@
     var BACK_LABEL = String(parameters['Back Label'] || 'Bumalik');
     var ENABLE_MAP = String(parameters['Map Dialogue'] || 'true') === 'true';
     var ENABLE_BATTLE = String(parameters['Battle Dialogue'] || 'true') === 'true';
-    var DEBUG_LOGGING = String(parameters['Debug Logging'] || 'false') === 'true';
+    // DEBUG_LOGGING: prefer window.RPGRXDebug so the master switch is respected.
+    // Falls back to the local param when RPGReloaded is not present.
+    function _debugEnabled() {
+        if (window.RPGRXDebug) return window.RPGRXDebug('DialogueNavigation');
+        return String(parameters['Debug Logging'] || 'false') === 'true';
+    }
 
     var histories = [];
     var activeNavigation = null;
@@ -54,7 +59,7 @@
     }
 
     function logNavigation(action, interpreter, history, page, choiceIndex) {
-        if (!DEBUG_LOGGING || !window.console || !console.log) return;
+        if (!_debugEnabled() || !window.console || !console.log) return;
         console.log('[PalConversationNavigation]', {
             action: action,
             scene: SceneManager._scene && SceneManager._scene.constructor.name,

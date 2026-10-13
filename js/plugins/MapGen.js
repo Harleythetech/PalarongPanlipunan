@@ -124,6 +124,16 @@
  *       Useful for debugging. 0 means a new dungeon every time.
  * @default 0
  *
+ * ─── DEBUG ───────────────────────────────────────────────────────────────────
+ * @param Debug Logging
+ * @text Debug Logging
+ * @type boolean
+ * @on  Enable
+ * @off Disable
+ * @default false
+ * @desc Log dungeon generation details (seed, room count, warnings) to the
+ *       browser console. Requires RPGReloaded Master Debug to also be ON.
+ *
  * ─── HELP ────────────────────────────────────────────────────────────────────
  * @help
  * ════════════════════════════════════════════════════════════════════
@@ -630,15 +640,19 @@
      */
     DungeonGen.generate = function (seed, enemyIds, itemIds) {
         if (!$dataMap || !$dataMap.data) {
-            console.warn('[MapGen] No $dataMap available. Call GenerateDungeon from an event on the map.');
+            if (window.RPGRXDebug && window.RPGRXDebug('MapGen')) {
+                console.warn('[MapGen] No $dataMap available. Call GenerateDungeon from an event on the map.');
+            }
             return;
         }
 
         // ── 12-a. Seed ──────────────────────────────────────────────────────
         if (!seed || seed === 0) seed = Math.floor(Math.random() * 0xFFFFFFFF) + 1;
         var rng = makePRNG(seed);
-        console.log('[MapGen] Generating dungeon — seed: ' + seed +
-                    ', map: ' + $dataMap.width + '×' + $dataMap.height);
+        if (window.RPGRXDebug && window.RPGRXDebug('MapGen')) {
+            console.log('[MapGen] Generating dungeon — seed: ' + seed +
+                        ', map: ' + $dataMap.width + '×' + $dataMap.height);
+        }
 
         // ── 12-b. Clear ─────────────────────────────────────────────────────
         this.clearAllLayers();
@@ -664,7 +678,9 @@
 
         var rooms = this.carveRooms(leaves, rng);
         if (rooms.length === 0) {
-            console.warn('[MapGen] No rooms were generated. Map may be too small.');
+            if (window.RPGRXDebug && window.RPGRXDebug('MapGen')) {
+                console.warn('[MapGen] No rooms were generated. Map may be too small.');
+            }
             return;
         }
 
@@ -692,7 +708,9 @@
         // ── 12-j. Rebuild the tilemap ────────────────────────────────────────
         this.refreshTilemap();
 
-        console.log('[MapGen] Done — ' + rooms.length + ' rooms generated.');
+        if (window.RPGRXDebug && window.RPGRXDebug('MapGen')) {
+            console.log('[MapGen] Done — ' + rooms.length + ' rooms generated.');
+        }
     };
 
     // ─────────────────────────────────────────────────────────────────────────

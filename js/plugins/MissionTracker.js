@@ -103,6 +103,16 @@
  * @desc How many in-game meters one map tile represents.
  * @default 1
  *
+ * ─── DEBUG ─────────────────────────────────────────────────────────────────────
+ * @param Debug Logging
+ * @text Debug Logging
+ * @type boolean
+ * @on  Enable
+ * @off Disable
+ * @default false
+ * @desc Log plugin command validation warnings to the console.
+ *       Requires RPGReloaded Master Debug to also be ON.
+ *
  * ─── HELP ─────────────────────────────────────────────────────────────────────
  * @help
  * ============================================================================
@@ -367,14 +377,18 @@ var $gameMissionTracker = null;
         // 'CM <eventId> <objectiveText...>'
         var eventId = parseInt(args[0], 10);
         if (isNaN(eventId) || eventId <= 0) {
-            console.warn('MissionTracker: invalid event ID "' + args[0] + '"');
+            if (window.RPGRXDebug && window.RPGRXDebug('MissionTracker')) {
+                console.warn('MissionTracker: invalid event ID "' + args[0] + '"');
+            }
             return;
         }
 
         // Objective text: everything after the first argument, joined back
         var text = args.slice(1).join(' ');
         if (!text) {
-            console.warn('MissionTracker: no objective text provided');
+            if (window.RPGRXDebug && window.RPGRXDebug('MissionTracker')) {
+                console.warn('MissionTracker: no objective text provided');
+            }
             return;
         }
 

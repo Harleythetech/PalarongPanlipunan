@@ -68,6 +68,15 @@
  * @default 8
  * @desc Y position of the top-center scoreboard pill.
  *
+ * @param Debug Logging
+ * @text Debug Logging
+ * @type boolean
+ * @on  Enable
+ * @off Disable
+ * @default false
+ * @desc Log battle HUD draw and update events to the console.
+ *       Requires RPGReloaded Master Debug to also be ON.
+ *
  * @help
  * ============================================================================
  * Plugin Commands

@@ -11,6 +11,15 @@
  * @default 10
  * @desc Maximum number of rows the dialogue window is allowed to grow to.
  *
+ * @param Debug Logging
+ * @text Debug Logging
+ * @type boolean
+ * @on  Enable
+ * @off Disable
+ * @default false
+ * @desc Log word-wrap and window resize events to the console.
+ *       Requires RPGReloaded Master Debug to also be ON.
+ *
  * @help
  * ============================================================================
  * DialogueAutoResize  v2.0

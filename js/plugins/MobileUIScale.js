@@ -30,6 +30,15 @@
  * @default 52
  * @desc Scaled font size will never go above this value (safety ceiling).
  *
+ * @param Debug Logging
+ * @text Debug Logging
+ * @type boolean
+ * @on  Enable
+ * @off Disable
+ * @default false
+ * @desc Log mobile detection and applied scale values to the console.
+ *       Requires RPGReloaded Master Debug to also be ON.
+ *
  * @help
  * ===========================================================================
  *  MobileUIScale

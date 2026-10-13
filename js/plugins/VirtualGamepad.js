@@ -100,6 +100,15 @@
  * @default false
  * @desc Show the gamepad on desktop/mouse devices (for testing).
  *
+ * @param Debug Logging
+ * @text Debug Logging
+ * @type boolean
+ * @on  Enable
+ * @off Disable
+ * @default false
+ * @desc Log touch input events and gamepad state changes to the console.
+ *       Requires RPGReloaded Master Debug to also be ON.
+ *
  * @command show
  * @text Show Gamepad
  * @desc Make the gamepad visible.

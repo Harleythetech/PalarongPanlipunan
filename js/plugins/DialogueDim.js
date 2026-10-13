@@ -2,6 +2,15 @@
  * @plugindesc Forces all Show Text dialogue windows to use the Dim background.
  * @author Harleythetech
  *
+ * @param Debug Logging
+ * @text Debug Logging
+ * @type boolean
+ * @on  Enable
+ * @off Disable
+ * @default false
+ * @desc Log background override calls to the console.
+ *       Requires RPGReloaded Master Debug to also be ON.
+ *
  * @help
  * Overrides the background setting saved on Show Text event commands so all
  * dialogue windows use the built-in Dim style. Choice windows are unchanged.

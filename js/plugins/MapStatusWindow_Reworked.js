@@ -27,6 +27,15 @@ Yanfly.MapStatus.version = 3.4;
  * @desc Width in pixels of the status windows.
  * @default 330
  *
+ * @param Debug Logging
+ * @text Debug Logging
+ * @type boolean
+ * @on  Enable
+ * @off Disable
+ * @default false
+ * @desc Log HUD refresh and layout events to the console.
+ *       Requires RPGReloaded Master Debug to also be ON.
+ *
  * @help
  * ============================================================================
  * Plugin Commands

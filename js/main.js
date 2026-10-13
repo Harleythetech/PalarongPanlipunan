@@ -12,6 +12,28 @@
 
     if (!window.console) return;  // silently no-op in environments with no console
 
+    // ── Master debug guard ────────────────────────────────────────────────────
+    // RPGReloaded.js runs AFTER main.js, so window.RPGRXMasterDebug is not yet
+    // set when this IIFE executes.  We read the raw plugins.js array directly
+    // instead so the boot logger can be suppressed even on the very first load.
+    (function _applyMasterGuard() {
+        if (typeof $plugins === 'undefined') return;
+        for (var i = 0; i < $plugins.length; i++) {
+            if ($plugins[i].name === 'RPGReloaded') {
+                var debugParam = $plugins[i].parameters && $plugins[i].parameters['Debug'];
+                if (String(debugParam) === 'false') {
+                    // Master switch is OFF — suppress the entire boot logger.
+                    window.RPGRXMasterDebug = false;
+                    return;
+                }
+                break;
+            }
+        }
+        window.RPGRXMasterDebug = true;
+    })();
+
+    if (window.RPGRXMasterDebug === false) return;
+
     var C          = window.console;
     var _bootStart = performance.now();
 
