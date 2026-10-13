@@ -21,6 +21,8 @@
  * Word-wrapped lines are each counted individually, so a single long sentence
  * that wraps to 3 visual lines correctly reserves 3 rows instead of 1.
  *
+ * The window will never shrink below 4 rows (RPG Maker MV's face portrait is
+ * exactly 4 rows tall, so this also prevents faces from being cut off).
  * The window will never exceed Max Rows (default 10) to avoid going off-screen.
  *
  * No other plugins required. No plugin commands.
@@ -113,6 +115,12 @@
 
             // Never go below the number of raw text entries (minimum 1 row each)
             totalLines = Math.max(texts.length, totalLines);
+
+            // Always show at least 4 rows — keeps the face portrait fully visible
+            // (RPG Maker MV's face image is exactly 4 rows tall) and gives
+            // short messages breathing room.
+            totalLines = Math.max(4, totalLines);
+
             return Math.min(MAX_ROWS, totalLines);
         } catch (e) {
             return 4;
