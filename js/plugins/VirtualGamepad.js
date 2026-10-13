@@ -278,16 +278,10 @@
 
 	document.addEventListener('touchstart', function _onFirstTouch() {
 		_deviceIsTouchCache = true;
-		console.log('[KK_VirtualGamepad] touchstart fired — device marked as touch');
 		document.removeEventListener('touchstart', _onFirstTouch);
 	}, { passive: true, once: true });
 
 	(function() {
-		var ua = navigator.userAgent || '';
-		console.log('[KK_VirtualGamepad] UA:', ua);
-		console.log('[KK_VirtualGamepad] maxTouchPoints:', navigator.maxTouchPoints);
-		console.log('[KK_VirtualGamepad] pointer:coarse:', window.matchMedia ? window.matchMedia('(pointer: coarse)').matches : 'N/A');
-		console.log('[KK_VirtualGamepad] isTouchDevice():', _isTouchDevice());
 	})();
 
 	function vibrate() {

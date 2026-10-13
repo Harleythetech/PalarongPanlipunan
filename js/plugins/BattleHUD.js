@@ -90,21 +90,6 @@
 
     var PLUGIN_NAME = 'BattleHUD';
     var params      = PluginManager.parameters(PLUGIN_NAME);
-    var DEBUG       = true;
-
-    function hudDebug(message, details) {
-        if (!DEBUG || !window.console || !console.log) return;
-        if (details !== undefined) {
-            console.log('[BattleHUD] ' + message, details);
-        } else {
-            console.log('[BattleHUD] ' + message);
-        }
-    }
-
-    hudDebug('plugin loaded', {
-        script: document.currentScript && document.currentScript.src,
-        params: params
-    });
 
     var CFG = {
         partyLabel:      String(params['partyLabel']           || 'Party'),
@@ -171,7 +156,7 @@
             _base = Number(fontProbe.standardFontSize()) || _base;
         }
     } catch (e) {
-        hudDebug('font-size probe failed; using fallback', e);
+        // font-size probe failed; using fallback
     }
     var FS = {
         title:  Math.max(11, Math.round(_base * 0.46 * CFG.uiScale)),
@@ -568,14 +553,6 @@
         this.addChild(this._palEnemyPanel);
         this.addChild(this._palPlayerPanel);
         this.addChild(this._palScorebar);
-        hudDebug('battle HUD sprites created', {
-            children: this.children.length,
-            spritesetIndex: this.children.indexOf(this._spriteset),
-            windowLayerIndex: this.children.indexOf(this._windowLayer),
-            enemyIndex: this.children.indexOf(this._palEnemyPanel),
-            playerIndex: this.children.indexOf(this._palPlayerPanel),
-            scoreIndex: this.children.indexOf(this._palScorebar)
-        });
     };
 
     var _Scene_Battle_start = Scene_Battle.prototype.start;
@@ -595,14 +572,6 @@
             var playerWidth = this._palPlayerPanel.bitmap ? this._palPlayerPanel.bitmap.width : Math.round(CFG.panelWidth * CFG.uiScale);
             this._palPlayerPanel.x = Graphics.boxWidth - playerWidth - CFG.panelMargin * CFG.uiScale;
         }
-        hudDebug('battle started', {
-            box: [Graphics.boxWidth, Graphics.boxHeight],
-            hud: {
-                enemy: this._palEnemyPanel && { visible: this._palEnemyPanel.visible, position: [this._palEnemyPanel.x, this._palEnemyPanel.y], bitmap: this._palEnemyPanel.bitmap && [this._palEnemyPanel.bitmap.width, this._palEnemyPanel.bitmap.height] },
-                player: this._palPlayerPanel && { visible: this._palPlayerPanel.visible, position: [this._palPlayerPanel.x, this._palPlayerPanel.y], bitmap: this._palPlayerPanel.bitmap && [this._palPlayerPanel.bitmap.width, this._palPlayerPanel.bitmap.height] },
-                score: this._palScorebar && { visible: this._palScorebar.visible, position: [this._palScorebar.x, this._palScorebar.y], bitmap: this._palScorebar.bitmap && [this._palScorebar.bitmap.width, this._palScorebar.bitmap.height] }
-            }
-        });
         if ($gameVariables) {
             $gameVariables.setValue(CFG.scoreVarId,      0);
             $gameVariables.setValue(CFG.enemyScoreVarId, 0);
@@ -631,29 +600,6 @@
     var _Scene_Battle_updateStatusWindow = Scene_Battle.prototype.updateStatusWindow;
     Scene_Battle.prototype.updateStatusWindow = function () {
         _Scene_Battle_updateStatusWindow.call(this);
-        if (this._palEnemyPanel && !this._palDebugLogged) {
-            this._palDebugLogged = true;
-            var report = function (sprite) {
-                return sprite ? {
-                    visible: sprite.visible,
-                    x: sprite.x,
-                    y: sprite.y,
-                    opacity: sprite.opacity,
-                    bitmap: sprite.bitmap && [sprite.bitmap.width, sprite.bitmap.height],
-                    parent: sprite.parent && sprite.parent.constructor.name
-                } : null;
-            };
-            hudDebug('first battle update', {
-                scene: this.constructor.name,
-                hud: {
-                    enemy: report(this._palEnemyPanel),
-                    player: report(this._palPlayerPanel),
-                    score: report(this._palScorebar)
-                },
-                windowLayer: this._windowLayer && { x: this._windowLayer.x, visible: this._windowLayer.visible, index: this.children.indexOf(this._windowLayer) },
-                sceneChildren: this.children.map(function (child) { return child.constructor.name; })
-            });
-        }
         if (this._statusWindow) {
             this._statusWindow.visible         = false;
             this._statusWindow.contentsOpacity = 0;
@@ -690,7 +636,6 @@
 
         var sub   = (args[0] || '').toLowerCase();
         var scene = SceneManager._scene;
-        hudDebug('plugin command', { command: command, args: args, scene: scene && scene.constructor.name });
 
         if (sub === 'show') {
             if (scene._palEnemyPanel)  scene._palEnemyPanel.visible  = true;

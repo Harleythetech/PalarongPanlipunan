@@ -2825,23 +2825,12 @@ PluginManager.setParameters = function(name, parameters) {
 
 PluginManager.loadScript = function(name) {
     var url = this._path + name;
-    var isBattleHud = name.toLowerCase() === 'battlehud.js';
     var script = document.createElement('script');
     script.type = 'text/javascript';
     script.src = url;
     script.async = false;
     script.onerror = this.onError.bind(this);
     script._url = url;
-    if (isBattleHud && window.console && console.log) {
-        console.log('[BattleHUD loader] requesting', url);
-        script.onload = function() {
-            console.log('[BattleHUD loader] loaded', script.src);
-        };
-        script.onerror = function(e) {
-            console.error('[BattleHUD loader] failed to load', script.src, e);
-            PluginManager.onError(e);
-        };
-    }
     document.body.appendChild(script);
 };
 

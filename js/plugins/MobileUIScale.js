@@ -74,7 +74,6 @@
     if (!isMobile()) return;
 
     window.MobileUIScale.scale = SCALE;
-    console.log('[KK_MobileUIScale] Mobile detected — applying UI scale ×' + SCALE);
 
     // ── Core scaling helpers ───────────────────────────────────────────────────
     // We patch Window_Base methods.  YEP_CoreEngine also patches these, so we
@@ -173,8 +172,6 @@
             _wrapMessageTexts(this);
             _startMessage.call(this);
         };
-
-        console.log('[MobileUIScale] Word wrap + windowHeight patches applied.');
     };
 
     // Measure pixel width of a plain string at a given font size.
@@ -254,7 +251,5 @@
     Window_Message.prototype.numVisibleRows = function () {
         return 3;
     };
-
-    console.log('[MobileUIScale] Mobile UI scale active.');
 
 })();
