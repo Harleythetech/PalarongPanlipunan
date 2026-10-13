@@ -6,7 +6,7 @@
  * @param Max Rows
  * @text Max Rows
  * @type number
- * @min 3
+ * @min 4
  * @max 20
  * @default 10
  * @desc Maximum number of rows the dialogue window is allowed to grow to.
@@ -30,7 +30,7 @@
  *
  * Page breaks (\f) are preserved — each Show Text "page" is still separate.
  *
- * MINIMUM HEIGHT: 3 rows (matches RPG Maker MV face portrait height).
+ * MINIMUM HEIGHT: 4 rows (matches RPG Maker MV face portrait height).
  * MAXIMUM HEIGHT: Max Rows parameter (default 10).
  * ============================================================================
  */
@@ -39,7 +39,7 @@
     'use strict';
 
     var params   = PluginManager.parameters('DialogueAutoResize');
-    var MAX_ROWS = Math.max(3, Number(params['Max Rows'] || 10));
+    var MAX_ROWS = Math.max(4, Number(params['Max Rows'] || 10));
 
     // -------------------------------------------------------------------------
     // Word-wrap a pre-converted text string (escape codes already replaced with
@@ -64,7 +64,7 @@
 
     function wordWrapPage(pageText, win, maxWidth) {
         // Join all hard-broken lines into one paragraph first, then re-wrap.
-        // This ensures text written with manual breaks in the old 3-row style
+        // This ensures text written with manual breaks in the old 4-row style
         // flows naturally in the resized window.
         var combined = pageText.split('\n').join(' ');
 
@@ -128,7 +128,7 @@
     // numVisibleRows — returns _dynamicRows while a message is active.
     // -------------------------------------------------------------------------
     Window_Message.prototype.numVisibleRows = function () {
-        return (this._dynamicRows !== undefined) ? this._dynamicRows : 3;
+        return (this._dynamicRows !== undefined) ? this._dynamicRows : 4;
     };
 
     // -------------------------------------------------------------------------
@@ -166,7 +166,7 @@
             // Step 3: count lines in the first page, resize window to fit.
             var firstPage     = this._textState.text.split('\f')[0];
             var lines         = countLines(firstPage);
-            this._dynamicRows = Math.min(MAX_ROWS, Math.max(3, lines));
+            this._dynamicRows = Math.min(MAX_ROWS, Math.max(4, lines));
             var newHeight     = this.fittingHeight(this._dynamicRows);
 
             if (this.height !== newHeight) {
@@ -186,13 +186,13 @@
     };
 
     // -------------------------------------------------------------------------
-    // terminateMessage — reset to 3-row default on close.
+    // terminateMessage — reset to 4-row default on close.
     // -------------------------------------------------------------------------
     var _orig_terminateMessage = Window_Message.prototype.terminateMessage;
     Window_Message.prototype.terminateMessage = function () {
         _orig_terminateMessage.call(this);
         this._dynamicRows = undefined;
-        this.height = this.fittingHeight(3);
+        this.height = this.fittingHeight(4);
         this.createContents();
     };
 
