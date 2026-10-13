@@ -202,7 +202,7 @@ Window_Base.prototype.drawCustomHudBar = function (
     );
   }
 
-  this.contents.fontSize = Math.max(9, Math.round((this.standardFontSize ? this.standardFontSize() : 28) * 0.39));
+  this.contents.fontSize = 11;
   var textY = y - 9;
 
   this.changeTextColor(this.systemColor());
@@ -229,25 +229,12 @@ Window_MapStatusHUD.prototype = Object.create(Window_Base.prototype);
 Window_MapStatusHUD.prototype.constructor = Window_MapStatusHUD;
 
 Window_MapStatusHUD.prototype.initialize = function () {
-  var _fs = Math.max(1, Window_Base.prototype.standardFontSize
-      ? Window_Base.prototype.standardFontSize() : 28);
-  var _innerPadY   = 6;
-  var _nameFs      = Math.max(12, Math.round(_fs * 0.57));
-  var _gaugeH      = Math.max(10, Math.round(_fs * 0.46));
-  var _gaugeLblH   = Math.max(9,  Math.round(_fs * 0.39));
-  var _rowGap      = 4;
-  var _labelAbove  = _gaugeLblH + 2;
-  var _neededH     = _innerPadY + _nameFs + _rowGap + _labelAbove + _gaugeH +
-                     _rowGap + _labelAbove + _gaugeH + _innerPadY;
-  var _winPad      = Window_Base.prototype.standardPadding
-      ? Window_Base.prototype.standardPadding() : 18;
-  var _leaderH     = _neededH + _winPad * 2;
   Window_Base.prototype.initialize.call(
     this,
     0,
     0,
     Yanfly.Param.MapStatusWinWidth,
-    _leaderH,
+    94,
   );
   this.openness = 0;
   this.opacity = 0;
@@ -308,67 +295,63 @@ Window_MapStatusHUD.prototype.refresh = function () {
   this.contents.outlineWidth = 3;
   this.contents.outlineColor = "rgba(0, 0, 0, 0.9)";
 
-  var _base       = this.standardFontSize ? this.standardFontSize() : 28;
-  var innerPadX   = 8;
-  var innerPadY   = 6;
-  var nameFs      = Math.max(12, Math.round(_base * 0.57));
-  var levelFs     = Math.max(10, Math.round(_base * 0.43));
-  var gaugeH      = Math.max(10, Math.round(_base * 0.46));
-  var gaugeLabelH = Math.max(9,  Math.round(_base * 0.39)); // font used inside drawCustomHudBar
-  var rowGap      = 4;   // gap between gauge rows
-  var labelAbove  = gaugeLabelH + 2; // drawCustomHudBar draws label at y-9; we give it space
+  // Inner layout padding
+  var innerPadX = 8;
+  var faceSize = 54;
+  var faceX = innerPadX;
+  var faceY = Math.floor((h - faceSize) / 2);
 
-  // Vertical layout (top to bottom inside contents area):
-  //   innerPadY
-  //   name row          (nameFs tall)
-  //   rowGap
-  //   labelAbove        (space for HP label drawn above bar)
-  //   HP gauge          (gaugeH tall)
-  //   rowGap
-  //   labelAbove        (space for MP label drawn above bar)
-  //   MP gauge          (gaugeH tall)
-  //   innerPadY
-  var nameY   = innerPadY;
-  var hpLblY  = nameY + nameFs + rowGap;
-  var hpY     = hpLblY + labelAbove;
-  var mpLblY  = hpY + gaugeH + rowGap;
-  var mpY     = mpLblY + labelAbove;
-  var neededH = mpY + gaugeH + innerPadY;
-
-  // Face: sized to fill the full needed height minus padding
-  var faceSize   = neededH - innerPadY * 2;
-  var faceX      = innerPadX;
-  var faceY      = innerPadY;
   var faceOffset = faceX + faceSize + 10;
-  var contentW   = w - faceOffset - innerPadX;
+  var contentWidth = w - faceOffset - innerPadX;
 
   // Face
   this.drawMiniFace(actor, faceX, faceY, faceSize, faceSize);
 
-  // Name
-  this.contents.fontSize = nameFs;
+  // Name & Level
+  this.contents.fontSize = 16;
   this.changeTextColor(this.hpColor(actor));
-  this.drawText(actor.name(), faceOffset, nameY, contentW - 52, "left");
+  this.drawText(actor.name(), faceOffset, -6, contentWidth - 52, "left");
 
-  // Level (right-aligned on same row as name)
   this.changeTextColor(this.systemColor());
-  this.contents.fontSize = levelFs;
-  this.drawText(TextManager.levelA, faceOffset + contentW - 48, nameY + 2, 20, "left");
+  this.contents.fontSize = 12;
+  this.drawText(
+    TextManager.levelA,
+    faceOffset + contentWidth - 48,
+    -4,
+    20,
+    "left",
+  );
   this.changeTextColor(this.normalColor());
-  this.drawText(String(actor.level), faceOffset + contentW - 28, nameY + 2, 28, "right");
-
-  // HP gauge
-  this.drawCustomHudBar(
-    faceOffset, hpY, contentW, gaugeH,
-    actor.hp, actor.mhp,
-    this.textColor(20), this.textColor(21), TextManager.hpA
+  this.drawText(
+    String(actor.level),
+    faceOffset + contentWidth - 28,
+    -4,
+    28,
+    "right",
   );
 
-  // MP gauge
+  // Gauges
   this.drawCustomHudBar(
-    faceOffset, mpY, contentW, gaugeH,
-    actor.mp, actor.mmp,
-    this.textColor(22), this.textColor(23), TextManager.mpA
+    faceOffset,
+    25,
+    contentWidth,
+    16,
+    actor.hp,
+    actor.mhp,
+    this.textColor(20),
+    this.textColor(21),
+    TextManager.hpA,
+  );
+  this.drawCustomHudBar(
+    faceOffset,
+    48,
+    contentWidth,
+    16,
+    actor.mp,
+    actor.mmp,
+    this.textColor(22),
+    this.textColor(23),
+    TextManager.mpA,
   );
 };
 
@@ -400,21 +383,12 @@ Window_MapCompanionHUD.prototype = Object.create(Window_Base.prototype);
 Window_MapCompanionHUD.prototype.constructor = Window_MapCompanionHUD;
 
 Window_MapCompanionHUD.prototype.initialize = function () {
-  var _fs2 = Math.max(1, Window_Base.prototype.standardFontSize
-      ? Window_Base.prototype.standardFontSize() : 28);
-  var _nameFs2     = Math.max(12, Math.round(_fs2 * 0.50));
-  var _gaugeH2     = Math.max(10, Math.round(_fs2 * 0.46));
-  var _gaugeLblH2  = Math.max(9,  Math.round(_fs2 * 0.39));
-  var _pad2        = Window_Base.prototype.standardPadding
-      ? Window_Base.prototype.standardPadding() : 18;
-  var _neededH2    = 6 + _nameFs2 + 4 + (_gaugeLblH2 + 2) + _gaugeH2 + 6;
-  var _companionH  = _neededH2 + _pad2 * 2;
   Window_Base.prototype.initialize.call(
     this,
     0,
     0,
     Yanfly.Param.MapStatusWinWidth,
-    _companionH,
+    64,
   );
   this.openness = 0;
   this.opacity = 0;
@@ -478,54 +452,48 @@ Window_MapCompanionHUD.prototype.refresh = function () {
   this.contents.outlineWidth = 3;
   this.contents.outlineColor = "rgba(0, 0, 0, 0.9)";
 
-  var _base2      = this.standardFontSize ? this.standardFontSize() : 28;
-  var innerPadX   = 8;
-  var innerPadY   = 6;
-  var nameFs2     = Math.max(12, Math.round(_base2 * 0.50));
-  var gaugeH2     = Math.max(10, Math.round(_base2 * 0.46));
-  var gaugeLblH2  = Math.max(9,  Math.round(_base2 * 0.39));
-  var rowGap2     = 4;
-  var labelAbove2 = gaugeLblH2 + 2;
+  // Inner layout padding
+  var innerPadX = 8;
+  var faceSize = 38;
+  var faceX = innerPadX;
+  var faceY = Math.floor((h - faceSize) / 2);
 
-  // Vertical flow: innerPadY → name → rowGap → labelAbove → gauge → innerPadY
-  var nameY2  = innerPadY;
-  var hpLblY2 = nameY2 + nameFs2 + rowGap2;
-  var hpY2    = hpLblY2 + labelAbove2;
-
-  var faceSize2   = hpY2 + gaugeH2 + innerPadY;
-  var faceX2      = innerPadX;
-  var faceY2      = innerPadY;
-  var faceOffset2 = faceX2 + faceSize2 + 10;
-  var contentW2   = w - faceOffset2 - innerPadX;
+  var faceOffset = faceX + faceSize + 10;
+  var contentWidth = w - faceOffset - innerPadX;
 
   var bitmap = ImageManager.loadFace(comp.faceName());
   if (!bitmap.isReady()) {
     var self = this;
-    bitmap.addLoadListener(function () { self.refresh(); });
+    bitmap.addLoadListener(function () {
+      self.refresh();
+    });
   } else {
     var faceIndex = comp.faceIndex();
     var sw = Window_Base._faceWidth;
     var sh = Window_Base._faceHeight;
     var sx = (faceIndex % 4) * sw;
     var sy = Math.floor(faceIndex / 4) * sh;
-    this.contents.blt(bitmap, sx, sy, sw, sh, faceX2, faceY2, faceSize2, faceSize2);
+    this.contents.blt(bitmap, sx, sy, sw, sh, faceX, faceY, faceSize, faceSize);
   }
 
-  // Name
-  this.contents.fontSize = nameFs2;
+  this.contents.fontSize = 14;
   this.changeTextColor(this.hpColor(comp));
-  this.drawText(comp.name(), faceOffset2, nameY2, contentW2 - 52, "left");
+  this.drawText(comp.name(), faceOffset, -7, contentWidth - 60, "left");
 
-  // "Kasama" label — right-aligned on the name row
   this.changeTextColor(this.systemColor());
-  this.contents.fontSize = gaugeLblH2;
-  this.drawText("Kasama", faceOffset2 + contentW2 - 54, nameY2 + 2, 54, "right");
+  this.contents.fontSize = 11;
+  this.drawText("Kasama", faceOffset + contentWidth - 50, -6, 50, "right");
 
-  // HP gauge
   this.drawCustomHudBar(
-    faceOffset2, hpY2, contentW2, gaugeH2,
-    comp.hp, comp.mhp,
-    this.textColor(20), this.textColor(21), TextManager.hpA
+    faceOffset,
+    20,
+    contentWidth,
+    16,
+    comp.hp,
+    comp.mhp,
+    this.textColor(20),
+    this.textColor(21),
+    TextManager.hpA,
   );
 };
 

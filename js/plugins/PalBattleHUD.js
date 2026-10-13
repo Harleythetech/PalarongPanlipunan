@@ -12,11 +12,10 @@
  * @author Harleythetech
  *
  * @param partyLabel
- * @text Party Label (Fallback)
+ * @text Party Label
  * @type string
- * @default Party
- * @desc Fallback shown on the scoreboard if no lead actor is available.
- *       During gameplay the label is automatically "[Lead Actor's Name]'s Party".
+ * @default Harley's Party
+ * @desc Party name shown on the right of the scoreboard pill.
  *
  * @param enemyLabel
  * @text Enemy Label
@@ -88,11 +87,11 @@
 (function () {
     'use strict';
 
-    var PLUGIN_NAME = 'BattleHUD';
+    var PLUGIN_NAME = 'PalBattleHUD';
     var params      = PluginManager.parameters(PLUGIN_NAME);
 
     var CFG = {
-        partyLabel:      String(params['partyLabel']           || 'Party'),
+        partyLabel:      String(params['partyLabel']           || "Harley's Party"),
         enemyLabel:      String(params['enemyLabel']           || 'Enemy'),
         scoreVarId:      Number(params['scoreVariableId']      || 1),
         enemyScoreVarId: Number(params['enemyScoreVariableId'] || 2),
@@ -100,7 +99,6 @@
         panelMargin:     Number(params['panelMargin']          || 8),
         panelY:          Number(params['panelY']               || 8),
         scorebarY:       Number(params['scorebarY']            || 8),
-        uiScale:         1,
     };
 
     // -------------------------------------------------------------------------
@@ -138,18 +136,17 @@
     var G = {
         cardBg:       'rgba(10, 14, 22, 0.65)',
         cardBorder:   'rgba(255, 255, 255, 0.12)',
-        cardRadius:   10 * CFG.uiScale,
+        cardRadius:   10,
         gaugeBg:      'rgba(0, 0, 0, 0.65)',
         pillBg:       'rgba(10, 14, 22, 0.72)',
-        pad:          8 * CFG.uiScale,
-        innerPad:     8 * CFG.uiScale,
+        pad:          8,
+        innerPad:     8,
         outlineColor: 'rgba(0,0,0,0.9)',
         outlineW:     3,
     };
 
-    // standardFontSize is normally an instance method. Avoid invoking it on
-    // the prototype: UI plugins may expect instance configuration there.
     var _base = 28;
+<<<<<<< HEAD:js/plugins/BattleHUD.js
     try {
         var fontProbe = new Window_Base(0, 0, 1, 1);
         if (fontProbe.standardFontSize) {
@@ -158,11 +155,13 @@
     } catch (e) {
         // font-size probe failed; using fallback
     }
+=======
+>>>>>>> ebd873d16b4abf9bb86c42ef501920b408226308:js/plugins/PalBattleHUD.js
     var FS = {
-        title:  Math.max(11, Math.round(_base * 0.46 * CFG.uiScale)),
-        name:   Math.max(12, Math.round(_base * 0.53 * CFG.uiScale)),
-        hp:     Math.max(11, Math.round(_base * 0.46 * CFG.uiScale)),
-        score:  Math.max(16, Math.round(_base * 0.75 * CFG.uiScale)),
+        title:  Math.max(11, Math.round(_base * 0.46)),  // 13 px — "ENEMIES/PARTY"
+        name:   Math.max(12, Math.round(_base * 0.53)),  // 15 px — member name
+        hp:     Math.max(11, Math.round(_base * 0.46)),  // 13 px — hp numbers
+        score:  Math.max(16, Math.round(_base * 0.75)),  // 21 px — scorebar
     };
     var FONT = 'GameFont, Arial, sans-serif';
 
@@ -301,16 +300,16 @@
         var titleH  = FS.title + ip;       // title row height
         var nameFs  = FS.name;
         var hpFs    = FS.hp;
-        var barH    = Math.max(10, Math.round(_base * 0.50 * CFG.uiScale));  // gauge height scales with font
-        var lineH   = nameFs + 4 * CFG.uiScale;          // single text line height
-        var w       = Math.round(CFG.panelWidth * CFG.uiScale);
+        var barH    = 14;                  // same as MapStatusWindow_Reworked gauge height
+        var lineH   = nameFs + 4;          // single text line height
+        var w       = CFG.panelWidth;
         var contentW = w - ip * 2;
 
         // Name column: ~45% of content width
         var nameColW = Math.floor(contentW * 0.44);
         var barX     = ip + nameColW + ip;
-        var barW     = contentW - nameColW - ip - 52 * CFG.uiScale;  // leave room for hp text
-        var numX     = barX + barW + 4 * CFG.uiScale;
+        var barW     = contentW - nameColW - ip - 52;  // leave 52px for hp text
+        var numX     = barX + barW + 4;
         var numW     = w - numX - ip;
 
         // Pre-compute wrapped names to know row heights
@@ -325,7 +324,7 @@
         // Total height
         var bodyH = 0;
         for (var ri = 0; ri < rows.length; ri++) bodyH += rows[ri].rowH;
-        var h = ip + titleH + 4 * CFG.uiScale + bodyH + ip;
+        var h = ip + titleH + 4 + bodyH + ip;
 
         this.bitmap = new Bitmap(w, h);
         var bmp     = this.bitmap;
@@ -352,7 +351,7 @@
         ctx.restore();
 
         // Rows
-        var curY = sepY + 4 * CFG.uiScale;
+        var curY = sepY + 4;
 
         for (var i = 0; i < rows.length; i++) {
             var r      = rows[i];
@@ -394,10 +393,10 @@
         bmp._setDirty();
 
         // Position with margin
-        this.y = CFG.panelY * CFG.uiScale;
+        this.y = CFG.panelY;
         this.x = (this._side === 'enemy')
-            ? CFG.panelMargin * CFG.uiScale
-            : Graphics.boxWidth - w - CFG.panelMargin * CFG.uiScale;
+            ? CFG.panelMargin
+            : Graphics.boxWidth - CFG.panelWidth - CFG.panelMargin;
     };
 
     Sprite_PalHPPanel.prototype.update = function () {
@@ -410,7 +409,7 @@
         }
         // Keep pinned to right edge (adaptive resolution)
         if (this._side === 'player') {
-            this.x = Graphics.boxWidth - this.bitmap.width - CFG.panelMargin * CFG.uiScale;
+            this.x = Graphics.boxWidth - CFG.panelWidth - CFG.panelMargin;
         }
     };
 
@@ -426,22 +425,10 @@
     Sprite_PalScorebar.prototype = Object.create(Sprite.prototype);
     Sprite_PalScorebar.prototype.constructor = Sprite_PalScorebar;
 
-    /** Returns the party label string — uses the lead actor's name at runtime,
-     *  falling back to the plugin-param value if the party isn't available. */
-    function getPartyLabel() {
-        try {
-            if ($gameParty && $gameParty.leader && $gameParty.leader()) {
-                return $gameParty.leader().name() + "'s Party";
-            }
-        } catch (e) { /* fall through */ }
-        return CFG.partyLabel;
-    }
-
     Sprite_PalScorebar.prototype._snap = function () {
         var es = $gameVariables ? $gameVariables.value(CFG.enemyScoreVarId) : 0;
         var ps = $gameVariables ? $gameVariables.value(CFG.scoreVarId)      : 0;
-        var lbl = getPartyLabel();
-        return es + '|' + ps + '|' + lbl;
+        return es + '|' + ps;
     };
 
     Sprite_PalScorebar.prototype._rebuild = function () {
@@ -455,11 +442,11 @@
 
         // Pill parts — labels white, scores coloured
         var parts = [
-            { text: CFG.enemyLabel + ': ',    color: '#ffffff'  },
-            { text: String(eScore),            color: '#ff6666' },
-            { text: '  |  ',                  color: '#888888' },
-            { text: String(pScore),            color: C.hp1     },
-            { text: '  :' + getPartyLabel(),   color: '#ffffff'  },
+            { text: CFG.enemyLabel + ': ', color: '#ffffff'  },
+            { text: String(eScore),         color: '#ff6666' },
+            { text: '  |  ',               color: '#888888' },
+            { text: String(pScore),         color: C.hp1     },
+            { text: '  :' + CFG.partyLabel, color: '#ffffff'  },
         ];
 
         // Measure using off-screen canvas
@@ -516,7 +503,7 @@
         bmp._setDirty();
 
         this.x = Math.floor((Graphics.boxWidth - w) / 2);
-        this.y = CFG.scorebarY * CFG.uiScale;
+        this.y = CFG.scorebarY;
     };
 
     Sprite_PalScorebar.prototype.update = function () {
@@ -540,13 +527,7 @@
     Scene_Battle.prototype.createAllWindows = function () {
         _Scene_Battle_createAllWindows.call(this);
         this._suppressDefaultBattleUI();
-    };
-
-    var _Scene_Battle_createDisplayObjects = Scene_Battle.prototype.createDisplayObjects;
-    Scene_Battle.prototype.createDisplayObjects = function () {
-        _Scene_Battle_createDisplayObjects.call(this);
-        // Attach to the scene after spriteset and window layer creation, so
-        // neither battle battlers nor Yanfly's movable window layer can cover it.
+        // Add AFTER window layer so they render on top of everything
         this._palEnemyPanel  = new Sprite_PalHPPanel('enemy');
         this._palPlayerPanel = new Sprite_PalHPPanel('player');
         this._palScorebar    = new Sprite_PalScorebar();
@@ -555,9 +536,12 @@
         this.addChild(this._palScorebar);
     };
 
+    // Reset both score variables to 0 at the start of every battle.
+    // This is the only place the plugin writes to these variables.
     var _Scene_Battle_start = Scene_Battle.prototype.start;
     Scene_Battle.prototype.start = function () {
         _Scene_Battle_start.call(this);
+<<<<<<< HEAD:js/plugins/BattleHUD.js
         if (this._palEnemyPanel) this._palEnemyPanel.visible = true;
         if (this._palPlayerPanel) this._palPlayerPanel.visible = true;
         if (this._palScorebar) {
@@ -572,6 +556,8 @@
             var playerWidth = this._palPlayerPanel.bitmap ? this._palPlayerPanel.bitmap.width : Math.round(CFG.panelWidth * CFG.uiScale);
             this._palPlayerPanel.x = Graphics.boxWidth - playerWidth - CFG.panelMargin * CFG.uiScale;
         }
+=======
+>>>>>>> ebd873d16b4abf9bb86c42ef501920b408226308:js/plugins/PalBattleHUD.js
         if ($gameVariables) {
             $gameVariables.setValue(CFG.scoreVarId,      0);
             $gameVariables.setValue(CFG.enemyScoreVarId, 0);
@@ -632,7 +618,7 @@
     var _Game_Interpreter_pluginCommand = Game_Interpreter.prototype.pluginCommand;
     Game_Interpreter.prototype.pluginCommand = function (command, args) {
         _Game_Interpreter_pluginCommand.call(this, command, args);
-        if (command !== 'BattleHUD' && command !== 'PalBattleHUD') return;
+        if (command !== 'PalBattleHUD') return;
 
         var sub   = (args[0] || '').toLowerCase();
         var scene = SceneManager._scene;
