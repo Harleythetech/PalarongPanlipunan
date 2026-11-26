@@ -49,6 +49,7 @@ function makeRuntime(pluginParams) {
     const soundLog = [];
     const flashLog = [];
 
+
     const stubLayer = { pushes: [], push(t, c) { this.pushes.push([t, c]); } };
 
     const party = {
@@ -153,6 +154,22 @@ function makeRuntime(pluginParams) {
     sandbox.Scene_Battle.prototype.createDisplayObjects = function () {};
     sandbox.Game_Interpreter.prototype.pluginCommand = function () {};
     sandbox.Game_Party.prototype.gainItem = function () {};
+    // Mirrors command314 (Recover All) for the party-wide form the maps use.
+    // params = [targetType, actorId]; actorId 0 means the whole party.
+    sandbox.Game_Interpreter.prototype.command314 = function () {
+        const params = this._params || [0, 0];
+        const id = Number(params[1]) || 0;
+        const list = party.members();
+        if (id === 0) list.forEach(m => m.recoverAll());
+        else if (list[id - 1]) list[id - 1].recoverAll();
+        return true;
+    };
+    // Mirrors command301 (Battle Processing): it is what starts the battle, and
+    // the plugin remembers the interpreter so only its own branch heal is capped.
+    sandbox.Game_Interpreter.prototype.command301 = function (troopId, canLose) {
+        BattleManager.setup(troopId || 1, false, canLose !== false);
+        return true;
+    };
 
     const context = vm.createContext(sandbox);
     vm.runInContext(read('js/plugins/PalSupport.js'), context, { filename: 'PalSupport.js' });
@@ -162,8 +179,10 @@ function makeRuntime(pluginParams) {
     // inherit it so the candy hook is actually exercised.
     Object.setPrototypeOf(party, sandbox.Game_Party.prototype);
 
-    // A Game_Interpreter that forwards commands exactly the way MV does.
+    // A Game_Interpreter that forwards commands exactly the way MV does. One
+    // instance is one map event, so `this` identity is meaningful.
     const interpreter = {
+        _params: [0, 0],
         cmd(command, ...args) {
             sandbox.Game_Interpreter.prototype.pluginCommand.call(this, command, args);
         },
@@ -172,6 +191,16 @@ function makeRuntime(pluginParams) {
             const parts = String(str).split(' ');
             const command = parts.shift();
             sandbox.Game_Interpreter.prototype.pluginCommand.call(this, command, parts);
+        },
+        // Mirrors command301 (Battle Processing) on this event.
+        startBattle(troopId, canLose) {
+            this._params = [troopId || 1, false, canLose !== false];
+            return sandbox.Game_Interpreter.prototype.command301.call(this, troopId || 1, canLose !== false);
+        },
+        // Mirrors command314 (Recover All) as the map events use it.
+        recoverAll(params) {
+            this._params = params || [0, 0];
+            return sandbox.Game_Interpreter.prototype.command314.call(this);
         }
     };
 
@@ -196,7 +225,7 @@ const PARAMS = {
 console.log('PalSupport — answer pipeline');
 {
     const R = makeRuntime(PARAMS);
-    R.BattleManager.setup(1, false, true);
+    R.interpreter.startBattle(1);
 
     eq('battle start support', R.vars[8], 100);
     eq('battle start hint charges', R.vars[11], 2);
@@ -206,7 +235,7 @@ console.log('PalSupport — answer pipeline');
     R.BattleManager.endBattle(0);
 
     const R2 = makeRuntime(PARAMS);
-    R2.BattleManager.setup(1, false, true);
+    R2.interpreter.startBattle(1);
 
     // three correct answers
     for (let i = 0; i < 3; i++) R2.interpreter.cmd('PalBattleHUD', 'score', 'add', '1');
@@ -228,7 +257,7 @@ console.log('PalSupport — answer pipeline');
 console.log('\nPalSupport — rank unlock at 100 points');
 {
     const R = makeRuntime(PARAMS);
-    R.BattleManager.setup(1, false, true);
+    R.interpreter.startBattle(1);
     R.vars[5] = 95;                       // 95 points, one answer away
     R.interpreter.cmd('PalBattleHUD', 'score', 'add', '1');
 
@@ -241,7 +270,7 @@ console.log('\nPalSupport — rank unlock at 100 points');
 console.log('\nPalSupport — wrong answers drain support');
 {
     const R = makeRuntime(PARAMS);
-    R.BattleManager.setup(1, false, true);
+    R.interpreter.startBattle(1);
 
     R.interpreter.cmd('PalBattleHUD', 'enemyscore', 'add', '1');
     eq('wrong count', R.vars[7], 1);
@@ -256,7 +285,7 @@ console.log('\nPalSupport — wrong answers drain support');
     check('buzzer sound played', R.soundLog.includes('buzzer'), R.soundLog);
 
     // Next battle gives him a little strength back.
-    R.BattleManager.setup(1, false, true);
+    R.interpreter.startBattle(1);
     eq('support restored between battles', R.vars[8], 25);
     eq('lost switch cleared', R.sws[23], false);
     eq('hints refilled', R.vars[11], 2);
@@ -265,7 +294,7 @@ console.log('\nPalSupport — wrong answers drain support');
 console.log('\nPalSupport — hint cost');
 {
     const R = makeRuntime(PARAMS);
-    R.BattleManager.setup(1, false, true);
+    R.interpreter.startBattle(1);
     R.vars[5] = 40;
     R.interpreter.cmd('PalSupport', 'hint');
     eq('points after hint', R.vars[5], 30);
@@ -279,7 +308,7 @@ console.log('\nPalSupport — quiz outcome');
     // Passed: enough right answers. quizdone applies the killing blow so the
     // engine's own victory path runs, and the party is left alone.
     const W = makeRuntime(PARAMS);
-    W.BattleManager.setup(4, false, true);
+    W.interpreter.startBattle(4);
     W.vars[6] = 4;                                  // Quiz_Correct
     W.vars[7] = 3;                                  // Quiz_Wrong
     W.interpreter.cmd('PalSupport', 'quizdone', '7', '4');
@@ -293,7 +322,7 @@ console.log('\nPalSupport — quiz outcome');
     // won: outside the tutorial no map heals and no shop sells a revive item, so
     // leaving them dead would strand that member for the rest of the game.
     const A = makeRuntime(PARAMS);
-    A.BattleManager.setup(4, false, true);
+    A.interpreter.startBattle(4);
     A.vars[6] = 4;
     A.vars[7] = 3;
     A.party._m[0].hp = 40;
@@ -304,7 +333,7 @@ console.log('\nPalSupport — quiz outcome');
 
     // Wiped out mid-quiz: a passing score cannot save a dead party.
     const X = makeRuntime(PARAMS);
-    X.BattleManager.setup(4, false, true);
+    X.interpreter.startBattle(4);
     X.vars[6] = 5;
     X.vars[7] = 2;
     X.party._m[0].hp = 0;
@@ -321,7 +350,7 @@ console.log('\nPalSupport — quiz outcome');
 
     // Failed: fewer right answers than the threshold.
     const L = makeRuntime(PARAMS);
-    L.BattleManager.setup(4, false, true);
+    L.interpreter.startBattle(4);
     L.troop._dead = false;
     L.vars[6] = 1;
     L.vars[7] = 6;
@@ -348,7 +377,7 @@ console.log('\nPalSupport — quiz outcome');
     // 0 HP on the map is the game over screen.
     eq('a knocked-out member is revived to 1 HP, not left dead', (function () {
         const Z = makeRuntime(PARAMS);
-        Z.BattleManager.setup(4, false, true);
+        Z.interpreter.startBattle(4);
         Z.vars[6] = 1;
         Z.vars[7] = 6;
         Z.party._m[0].hp = 7;
@@ -362,7 +391,7 @@ console.log('\nPalSupport — quiz outcome');
     // And the damage must survive to the map for a survivor as usual.
     eq('the survivor still keeps its own HP', (function () {
         const Z = makeRuntime(PARAMS);
-        Z.BattleManager.setup(4, false, true);
+        Z.interpreter.startBattle(4);
         Z.vars[6] = 1;
         Z.vars[7] = 6;
         Z.party._m[0].hp = 7;
@@ -375,7 +404,7 @@ console.log('\nPalSupport — quiz outcome');
 
     // A quiz authored without "can lose" must still never reach game over.
     const V = makeRuntime(PARAMS);
-    V.BattleManager.setup(4, false, false);       // canLose = false
+    V.interpreter.startBattle(4, false);       // canLose = false
     V.vars[6] = 0;
     V.interpreter.cmd('PalSupport', 'quizdone', '7', '4');
     check('a quiz loss forces canLose so the game over screen is unreachable',
@@ -387,7 +416,7 @@ console.log('\nPalSupport — quiz outcome');
 
     eq('a won fight is never touched by the defeat hook', (function () {
         const W2 = makeRuntime(PARAMS);
-        W2.BattleManager.setup(1, false, true);
+        W2.interpreter.startBattle(1);
         W2.interpreter.cmd('PalBattleHUD', 'score', 'add', '1');
         W2.party._m[0].hp = 37;
         W2.BattleManager.endBattle(0);
@@ -398,11 +427,11 @@ console.log('\nPalSupport — quiz outcome');
     // A decided quiz cannot be replayed into the hook: setup clears it.
     eq('a stale defeat never leaks into the next battle', (function () {
         const N = makeRuntime(PARAMS);
-        N.BattleManager.setup(4, false, true);
+        N.interpreter.startBattle(4);
         N.vars[6] = 0;
         N.interpreter.cmd('PalSupport', 'quizdone', '7', '4');
         N.party._m[0].hp = 80;                    // hypothetically healed between fights
-        N.BattleManager.setup(4, false, true);    // next battle starts
+        N.interpreter.startBattle(4);    // next battle starts
         N.BattleManager.endBattle(2);
         N.BattleManager.updateBattleEnd();
         return N.party._m[0].hp;
@@ -410,12 +439,130 @@ console.log('\nPalSupport — quiz outcome');
 
     // Without the injected threshold the command still has a safe default.
     const D = makeRuntime(PARAMS);
-    D.BattleManager.setup(4, false, true);
+    D.interpreter.startBattle(4);
     D.vars[6] = 3;                                  // half of 6
     D.interpreter.cmd('PalSupport', 'quizdone', '6');
     check('quizdone without a threshold defaults to half the questions',
         D.troop.isAllDead(), D.troop.members()[0].hp);
     eq('default threshold leaves the party alive', D.party._m[0].hp, 100);
+}
+
+console.log('\nPalSupport — the quiz damage survives the map\'s own heal');
+{
+    // The tutorial calls Recover All in both its win and lose branches. That is
+    // the only recovery in the project, so it must still heal — but it must not
+    // hand back the damage the quiz just cost.
+    //
+    // Enter at 100, take 50 damage, win: the map's Recover All leaves 50.
+    const W = makeRuntime(PARAMS);
+    W.interpreter.startBattle(1);
+    W.vars[6] = 2;
+    W.vars[7] = 1;
+    W.party._m[0].hp = 50;                          // 50 damage during the quiz
+    W.party._m[1].hp = 40;
+    W.interpreter.cmd('PalSupport', 'quizdone', '3', '2');
+    W.BattleManager.endBattle(0);
+    W.BattleManager.updateBattleEnd();
+    eq('a won quiz keeps its damage on the map', W.party._m[0].hp, 50);
+    W.interpreter.recoverAll();                     // the map's If Win branch
+    eq('the win branch Recover All cannot hand the quiz damage back', W.party._m[0].hp, 50);
+    eq('and the second member keeps its damage too', W.party._m[1].hp, 40);
+
+    // Same after a lost quiz: the If Lose branch also calls Recover All.
+    const L = makeRuntime(PARAMS);
+    L.interpreter.startBattle(1);
+    L.vars[6] = 0;
+    L.vars[7] = 3;
+    L.party._m[0].hp = 70;                          // 30 damage during the quiz
+    L.interpreter.cmd('PalSupport', 'quizdone', '3', '2');
+    L.BattleManager.endBattle(2);
+    L.BattleManager.updateBattleEnd();
+    eq('a lost quiz keeps its damage on the map', L.party._m[0].hp, 70);
+    L.interpreter.recoverAll();                     // the map's If Lose branch
+    eq('the lose branch Recover All cannot hand the quiz damage back', L.party._m[0].hp, 70);
+
+    // The authored heal still does its job for damage taken BEFORE the quiz.
+    // Enter at 40, lose 10 during the quiz: the Recover All tops up to
+    // 100 - 10 = 90, never less than the 30 the party had earned.
+    const P = makeRuntime(PARAMS);
+    P.party._m[0].hp = 40;                          // already hurt before the battle
+    P.party._m[1].hp = 30;
+    P.interpreter.startBattle(1);          // this is the HP the quiz starts from
+    P.vars[6] = 2;
+    P.vars[7] = 1;
+    P.party._m[0].hp = 30;                          // 10 damage during the quiz
+    P.party._m[1].hp = 20;
+    P.interpreter.cmd('PalSupport', 'quizdone', '3', '2');
+    P.BattleManager.endBattle(0);
+    P.BattleManager.updateBattleEnd();
+    P.interpreter.recoverAll();
+    eq('the authored top-up still applies around the quiz damage', P.party._m[0].hp, 90);
+    eq('the second member gets its top-up too', P.party._m[1].hp, 70);
+
+    // A heal with no quiz behind it is untouched.
+    const N = makeRuntime(PARAMS);
+    N.interpreter.startBattle(1);
+    N.party._m[0].hp = 20;
+    N.BattleManager.endBattle(0);
+    N.BattleManager.updateBattleEnd();
+    N.interpreter.recoverAll();
+    eq('an ordinary Recover All still heals fully', N.party._m[0].hp, 100);
+
+    // A heal aimed at one actor is not the post-battle branch heal: leave it.
+    const T = makeRuntime(PARAMS);
+    T.interpreter.startBattle(1);
+    T.vars[6] = 2;
+    T.vars[7] = 1;
+    T.party._m[0].hp = 50;
+    T.party._m[1].hp = 40;
+    T.interpreter.cmd('PalSupport', 'quizdone', '3', '2');
+    T.BattleManager.endBattle(0);
+    T.BattleManager.updateBattleEnd();
+    T.interpreter.recoverAll([0, 2]);              // one specific actor (actor 2)
+    eq('a single-actor heal is left alone', T.party._m[1].hp, 80);
+    eq('the others keep the quiz damage', T.party._m[0].hp, 50);
+
+    // A member who was already dead before the battle is not part of this: no
+    // free revive, and no HP rewrite.
+    const F = makeRuntime(PARAMS);
+    F.party._m[1].hp = 0;                          // dead on the map before the fight
+    F.interpreter.startBattle(1);
+    F.vars[6] = 2;
+    F.vars[7] = 1;
+    F.party._m[0].hp = 50;
+    F.interpreter.cmd('PalSupport', 'quizdone', '3', '2');
+    F.BattleManager.endBattle(0);
+    F.BattleManager.updateBattleEnd();
+    eq('a won quiz does not revive a member who was already dead', F.party._m[1].hp, 0);
+    eq('the living member is still handled normally', F.party._m[0].hp, 50);
+
+    // The guard is one-shot: a second heal a moment later is a real heal.
+    const S = makeRuntime(PARAMS);
+    S.interpreter.startBattle(1);
+    S.vars[6] = 2;
+    S.vars[7] = 1;
+    S.party._m[0].hp = 50;
+    S.interpreter.cmd('PalSupport', 'quizdone', '3', '2');
+    S.BattleManager.endBattle(0);
+    S.BattleManager.updateBattleEnd();
+    S.interpreter.recoverAll();
+    eq('first heal after the quiz keeps the damage', S.party._m[0].hp, 50);
+    S.interpreter.recoverAll();
+    eq('a later heal is a real heal again', S.party._m[0].hp, 100);
+
+    // A heal from a different event - an inn, a save point - is never capped,
+    // however soon it happens.
+    const E = makeRuntime(PARAMS);
+    E.interpreter.startBattle(1);
+    E.vars[6] = 2;
+    E.vars[7] = 1;
+    E.party._m[0].hp = 50;
+    E.interpreter.cmd('PalSupport', 'quizdone', '3', '2');
+    E.BattleManager.endBattle(0);
+    E.BattleManager.updateBattleEnd();
+    const inn = { _params: [0, 0] };
+    E.sandbox.Game_Interpreter.prototype.command314.call(inn);
+    eq('a heal from another event is never capped', E.party._m[0].hp, 100);
 }
 
 console.log('\nPalSupport — the tutorial Game Over command is neutralised');
@@ -453,7 +600,7 @@ console.log('\nPalSupport — candy items');
     check('candy has a point note', /<CandyPoint:10>/i.test(candy.note), candy.note);
     check('candy has an icon', candy.iconIndex > 0, candy.iconIndex);
 
-    R.BattleManager.setup(1, false, true);
+    R.interpreter.startBattle(1);
     R.party.gainItem(candy, 2, false);
     eq('two candies add 20 points', R.vars[5], 20);
 }
@@ -462,7 +609,7 @@ console.log('\nPalSupport — kill switch');
 {
     const R = makeRuntime(PARAMS);
     R.sws[31] = true;                     // PalSupport_Disabled
-    R.BattleManager.setup(1, false, true);
+    R.interpreter.startBattle(1);
     R.interpreter.cmd('PalBattleHUD', 'score', 'add', '1');
     eq('disabled plugin does not award points', R.vars[5] || 0, 0);
     eq('disabled plugin does not count correct', R.vars[6] || 0, 0);
@@ -476,7 +623,7 @@ console.log('\nPalQuiz — runtime shuffle');
 
     let changed = false;
     for (let i = 0; i < 20 && !changed; i++) {
-        R.BattleManager.setup(3, false, true);
+        R.interpreter.startBattle(3);
         const after = R.sandbox.$dataTroops[3].pages[0].list;
         if (JSON.stringify(after) !== JSON.stringify(before)) changed = true;
     }
@@ -497,7 +644,7 @@ console.log('\nPalQuiz — runtime shuffle');
     const D = makeRuntime(PARAMS);
     D.sws[30] = true;                     // QuizShuffle_Disabled
     const raw = JSON.parse(JSON.stringify(D.sandbox.$dataTroops[4].pages[0].list));
-    D.BattleManager.setup(4, false, true);
+    D.interpreter.startBattle(4);
     check('disabled shuffler leaves the page alone',
         JSON.stringify(D.sandbox.$dataTroops[4].pages[0].list) === JSON.stringify(raw));
 
@@ -505,7 +652,7 @@ console.log('\nPalQuiz — runtime shuffle');
     // last-question 100 is what ends the battle when quizdone is ignored.
     const S = makeRuntime(PARAMS);
     S.sws[31] = true;                     // PalSupport_Disabled
-    S.BattleManager.setup(1, false, true);
+    S.interpreter.startBattle(1);
     const dmg = S.sandbox.$dataTroops[1].pages[0].list
         .filter(c => c.code === 331).map(c => c.parameters[3]);
     check('with PalSupport off, authored damage is kept so the battle can end',
@@ -534,7 +681,7 @@ console.log('\nPalQuiz — injected command shape');
 
     // And it must actually dispatch through the engine's parser.
     const before = R.vars[11];
-    R.BattleManager.setup(1, false, true);
+    R.interpreter.startBattle(1);
     R.vars[6] = 0;                                   // 0 correct -> quiz failed
     R.interpreter.line(String(done[0].parameters[0]));
     check('quizdone knocks the party out for the engine defeat path',
@@ -547,7 +694,7 @@ console.log('\nPalQuiz — injected command shape');
         shuffleQuestions: true, shuffleAnswers: true, neutralizeOrdinals: true, injectHint: true
     });
     const pdone = pout.filter(c => c.code === 356 && /^palsupport quizdone/i.test(String(c.parameters[0] || '')));
-    P.BattleManager.setup(1, false, true);
+    P.interpreter.startBattle(1);
     P.vars[6] = 2;                                   // 2 of 3 is a pass
     P.interpreter.line(String(pdone[0].parameters[0]));
     check('quizdone finishes the enemy when the score passes', P.troop.isAllDead(), P.troop.members()[0].hp);

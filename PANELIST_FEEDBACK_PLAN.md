@@ -205,6 +205,16 @@ Rewritten in the runtime copy only:
   party to full after a loss, which made the quiz damage meaningless. The restore
   runs at exit, not at defeat, so the HUD still shows the party dead for the whole
   defeat message — the battle visibly ends with a knockout.
+- **The map's own heal cannot undo it.** The tutorial is the only place in the
+  project with a heal (two `Recover All` commands, one in the `If Win` branch and
+  one in `If Lose`, Map002 event 4), and a battle's branch runs immediately after
+  the battle. That heal is left in place — it is the only recovery the game has —
+  but it is capped at *max HP minus what this quiz cost*: enter at 100, lose 50,
+  leave at 50 even after `Recover All`. Damage taken **before** the battle is
+  still healed by it, so the authored top-up keeps working. The cap is tied to
+  the event that started the battle (its own `If Win`/`If Lose` branch), runs
+  once, and can never leave a member below the HP they earned. A heal from any
+  other event — an inn, a save point — is never touched.
 - A member that actually hit 0 HP mid-quiz comes back at 1 HP, never 0: 0 HP on
   the map is the game over screen.
 - **A wiped party cannot win.** Damage carries between battles now, so it is
@@ -325,6 +335,10 @@ node tools/simulate_battle.js        # 7344 answer paths, 0 failures
 - won quiz leaves the party alone; failed quiz knocks them out and the
   `updateBattleEnd` hook puts them back on the HP they had earned, so the wrong
   answers still cost health afterwards
+- a `Recover All` straight after the quiz (the tutorial's win and lose branches)
+  keeps that quiz's damage, while still healing anything lost before the battle
+- a heal with no quiz behind it, a second heal, and a heal from another event
+  (inn, save point) all still heal fully, even one second later
 - a member knocked out mid-quiz comes back at 1 HP, never 0 (no game over loop)
 - a stale defeat flag never leaks into the next battle
 - candy adds 10 points each
@@ -380,8 +394,11 @@ These need the actual game window; the harness cannot render or read input.
 3. Replay a boss three times → three different orders; no repeats inside one run.
 4. Answer everything wrong → `KULANG PA`, the defeat message, Arkin's "magbasa
    muna tayo" line, and the party on the map **missing the HP the wrong answers
-   cost** (not healed to full). Each wrong answer should take a small, equal
-   slice of HP — never knock anyone out in one hit at full health.
+   cost** (not healed to full by the branch's `Recover All`). Each wrong answer
+   should take a small, equal slice of HP — never knock anyone out in one hit at
+   full health.
+5. Win the tutorial with one or two wrong answers → `PANALO!`, and the party
+   leaves at 100 minus the damage those wrong answers cost.
 5. Lose seven answers' worth of support → card reads `WALA`, the hint option
    refuses ("Naubos na ang aking mga tala").
 6. Reach 100 points → rank badge flips to `GABAY`.

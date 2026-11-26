@@ -83,8 +83,10 @@
  *       engine ends the battle through the normal victory path; failing knocks
  *       the party out so the engine runs its normal defeat path, then restores
  *       the HP the party had earned. The damage from wrong answers is therefore
- *       permanent, like a normal battle. A wiped party loses even if the score
- *       passes, and a member knocked out during a won quiz gets up at 1 HP.
+ *       permanent, like a normal battle — including through the map's own
+ *       "Recover All" in the battle's win/lose branch, which is capped at max HP
+ *       minus this quiz's damage. A wiped party loses even if the score passes,
+ *       and a member knocked out during a won quiz gets up at 1 HP.
  *
  *   PalSupport hint
  *       Charges one hint to the player. Injected automatically by PalQuiz at
@@ -143,12 +145,19 @@
         { min: 500, max: Infinity, hp: 200, hints: 5, name: 'Katuwang' }
     ];
 
-    // Set when the quiz was failed and the party was knocked out on purpose, so
-    // the engine runs its normal defeat path. Also holds the HP each member had
-    // earned when the quiz ended: the knockout is what ends the battle, but the
-    // damage from the wrong answers is what the player walks away with.
-    var quizDefeat = false;
-    var defeatHp = null;
+    // The HP each member has earned by the time the quiz ends. Play is scored by
+    // health now, so this is the value the player must walk away with: a wrong
+    // answer costs HP and that cost is kept after the quiz, won or lost.
+    //
+    // Recorded at quizdone and applied once the battle is over. The map's own
+    // post-battle branch usually calls Recover All, which would silently erase
+    // the damage again, so the same values are re-applied once if that happens.
+    var resultHp = null;
+
+    // The map event interpreter that started the battle. Its "If Win" / "If Lose"
+    // branch is the only heal that belongs to the battle's aftermath; an inn or a
+    // story heal runs on a different interpreter and must never be capped.
+    var quizBattleInterpreter = null;
 
     // -------------------------------------------------------------------------
     // Helpers
@@ -328,6 +337,11 @@
         refreshState();
         updateAccuracy();
 
+        // Snapshot what the quiz cost before anything below changes HP. The
+        // snapshot is what the player walks away with: the quiz's own mistakes
+        // are spent, whatever the map does afterwards.
+        recordResultHp();
+
         // A wiped party cannot win, however many right answers came after it
         // happened. Damage carries over between battles now, so it is possible
         // to walk into a quiz at low HP and be knocked out mid-round. The quiz
@@ -354,13 +368,17 @@
             // Anyone knocked out during the quiz gets back up at 1 HP. A normal
             // victory would leave them dead on the map, and outside the tutorial
             // no map heals and no shop sells a revive item, so a dead member
-            // would be stranded for good. The 1 HP is the consequence.
+            // would be stranded for good. The 1 HP is the consequence. Only
+            // members who walked into the battle alive are stood back up.
             try {
-                $gameParty.members().forEach(function (m) {
-                    if (m && m.isDead() && m.setHp) m.setHp(1);
+                (resultHp || []).forEach(function (e) {
+                    if (!e || !e.actor || e.enter <= 0) return;
+                    if (e.actor.isDead && e.actor.isDead() && e.actor.setHp) e.actor.setHp(1);
                 });
             } catch (e) { log('victory revive failed', e); }
 
+            // Keep the snapshot honest about anyone who just stood back up.
+            syncResultHp();
             pop('PANALO!', '#FFD700');
             log('quiz done', correct + '/' + total, 'victory (needed ' + need + ')');
             return;
@@ -369,17 +387,9 @@
         // Failed round. The quiz is finished, so the fight has to end — and it
         // has to end with the party actually knocked out, so the player sees a
         // real defeat instead of a fight that stops with everyone standing.
-        // Remember the HP they earned first: the knockout ends the battle, but
-        // the damage from the wrong answers is what they keep afterwards.
-        // The tutorial's "Game Over" command is stripped by PalQuiz.
-        defeatHp = [];
-        try {
-            $gameParty.members().forEach(function (m) {
-                if (m) defeatHp.push({ actor: m, hp: m.hp });
-            });
-        } catch (e) { defeatHp = null; }
-
-        quizDefeat = true;
+        // The snapshot above already holds the HP they earned; the knockout ends
+        // the battle, not the damage. The tutorial's "Game Over" command is
+        // stripped by PalQuiz.
 
         // The quiz itself decides the loss, so never let it fall through to the
         // game over screen even if the map event was authored without
@@ -642,13 +652,16 @@
         try {
             if (disabled()) return;
 
+            // Baseline for the quiz damage: the HP the player walked in with.
+            recordEnterHp();
+
             // Per-battle counters
             sv(C.correctVar, 0);
             sv(C.wrongVar, 0);
             sv(C.streakVar, 0);
             sv(C.accuracyVar, 0);
-            quizDefeat = false;
-            defeatHp = null;
+            resultHp = null;
+            quizBattleInterpreter = null;
 
             var points = gv(C.pointsVar);
             var rank   = rankFor(points);
@@ -675,29 +688,156 @@
         } catch (e) { log('battle setup failed', e); }
     };
 
-    // A failed quiz knocks the party out so the engine runs its normal defeat
-    // path (defeat ME + defeat message + the map's "If Lose" branch). The
-    // knockout must not also erase the damage: once the battle is over, each
-    // member goes back to the HP they had earned, so a wrong answer costs health
-    // on the map exactly like a normal battle.
+    // HP at the start of the battle, in party order. The quiz damage is measured
+    // from here, so the cost of a wrong answer is exactly what the player
+    // watched come off the bar.
+    var enterHp = null;
+
+    // The actors that actually took part in the battle. Reserves did not, and a
+    // member who was already dead before the fight must stay dead.
+    function partyList() {
+        try {
+            if ($gameParty && $gameParty.battleMembers) return $gameParty.battleMembers();
+            if ($gameParty && $gameParty.members) return $gameParty.members();
+        } catch (e) { /* fall through */ }
+        return [];
+    }
+
+    function recordEnterHp() {
+        enterHp = null;
+        try {
+            enterHp = partyList().map(function (m) { return { actor: m, hp: m ? m.hp : 0 }; });
+        } catch (e) { enterHp = null; }
+    }
+
+    // HP the actor walked into the battle with. Identity based, so a party that
+    // changed shape during the battle cannot shift the numbers onto the wrong
+    // member.
+    function enterHpFor(m) {
+        if (!enterHp) return m.hp;
+        for (var i = 0; i < enterHp.length; i++) {
+            if (enterHp[i].actor === m) return enterHp[i].hp;
+        }
+        return m.hp;
+    }
+
+    // Remember the HP each member has earned by the end of the quiz, and how
+    // much of it the quiz itself took. The knockout on a lost round happens
+    // after this, so the numbers survive it. `loss` is what a later heal has to
+    // leave spent.
+    function recordResultHp() {
+        resultHp = [];
+        try {
+            partyList().forEach(function (m) {
+                if (!m) return;
+                var start = enterHpFor(m);
+                var hp = Math.max(0, Math.min(m.mhp, m.hp || 0));
+                resultHp.push({
+                    actor: m,
+                    enter: start,
+                    hp: hp,
+                    loss: Math.max(0, start - Math.max(hp, 1))
+                });
+            });
+        } catch (e) { resultHp = null; }
+    }
+
+    // After a won quiz, anyone who was knocked out has just been stood back up
+    // at 1 HP. Keep the snapshot in step so the map sees the same number.
+    function syncResultHp() {
+        (resultHp || []).forEach(function (e) {
+            if (!e || !e.actor || e.enter <= 0) return;
+            e.hp = Math.max(1, Math.min(e.actor.mhp, e.actor.hp || 0));
+        });
+    }
+
+    // Put every member back on the HP they earned. Floored at 1: 0 HP on the map
+    // is the game over screen, and nobody is left dead by a quiz. A member who
+    // was already dead before the battle is left exactly as they were.
+    function applyResultHp() {
+        (resultHp || []).forEach(function (e) {
+            if (!e || !e.actor || !e.actor.setHp) return;
+            if (e.enter <= 0) return;
+            e.actor.setHp(Math.max(1, Math.min(e.actor.mhp, e.hp)));
+        });
+    }
+
+    // Used when the map heals the party straight after the battle. The heal is
+    // allowed to do its job, but the mistakes of the quiz that just ended are
+    // already spent: the member ends on max HP minus what the quiz cost, and
+    // never on less than they had earned. So a party that enters at 100 and
+    // takes 50 damage leaves at 50 even if the map says "Recover All", while a
+    // party that entered at 40 still gets the authored top-up.
+    function applyResultHpAfterHeal() {
+        (resultHp || []).forEach(function (e) {
+            if (!e || !e.actor || !e.actor.setHp) return;
+            if (e.enter <= 0) return;
+            var mhp = e.actor.mhp;
+            var target = mhp - (e.loss || 0);
+            if (target < e.hp) target = e.hp;      // never below the unhealed value
+            e.actor.setHp(Math.max(1, Math.min(mhp, target)));
+        });
+    }
+
+    function clearResultHp() {
+        resultHp = null;
+        quizBattleInterpreter = null;
+    }
+
+    // A quiz that is lost knocks the party out so the engine runs its normal
+    // defeat path (defeat ME + defeat message + the map's "If Lose" branch). The
+    // knockout must not erase the damage: once the engine is done with the
+    // battle, each member goes back to the HP they had earned.
     //
-    // Restored here, after the engine has finished with the battle, so the HUD
-    // still shows the party dead for the whole defeat message. Never leave
-    // anyone at 0: 0 HP on the map is the game over screen.
+    // Applied here, after the engine has finished with the battle, so the HUD
+    // still shows the party dead for the whole defeat message.
     var _BattleManager_updateBattleEnd = BattleManager.updateBattleEnd;
     BattleManager.updateBattleEnd = function () {
         _BattleManager_updateBattleEnd.apply(this, arguments);
         try {
-            if (!quizDefeat) return;
-            quizDefeat = false;
-            var earned = defeatHp;
-            defeatHp = null;
-            (earned || []).forEach(function (e) {
-                if (!e || !e.actor) return;
-                e.actor.setHp(Math.max(1, Math.min(e.actor.mhp, e.hp)));
-            });
-            log('quiz defeat: party keeps the damage it took');
-        } catch (e) { log('post-defeat restore failed', e); }
+            if (disabled() || !resultHp) return;
+            applyResultHp();
+            log('quiz result: party keeps the HP it earned');
+        } catch (e) { log('post-battle restore failed', e); }
+    };
+
+    // Remember which event ran the battle, so only that event's own aftermath
+    // heal is treated as part of the battle.
+    var _Game_Interpreter_command301 = Game_Interpreter.prototype.command301;
+    Game_Interpreter.prototype.command301 = function () {
+        var ok = _Game_Interpreter_command301.apply(this, arguments);
+        try {
+            // BattleManager.setup() puts the phase on 'start'. A no-op call (one
+            // made while a battle is already running) leaves it alone.
+            if (BattleManager._phase === 'start') quizBattleInterpreter = this;
+        } catch (e) { log('battle interpreter capture failed', e); }
+        return ok;
+    };
+
+    // The map event that started the battle continues straight into its
+    // "If Win" / "If Lose" branch, and both of the tutorial's branches call
+    // Recover All. That heal is the only recovery in the whole project, so it
+    // cannot simply be blocked — but it must not hand back the damage the quiz
+    // just cost either. The branch's heal is capped at "max HP minus this quiz's
+    // mistakes"; any other heal is untouched.
+    var _Game_Interpreter_command314 = Game_Interpreter.prototype.command314;
+    Game_Interpreter.prototype.command314 = function () {
+        var ok = _Game_Interpreter_command314.apply(this, arguments);
+        try {
+            if (disabled() || !resultHp) return ok;
+            if (this !== quizBattleInterpreter) return ok;
+
+            // Only a party-wide Recover All is the authored post-battle heal.
+            // A heal aimed at one actor is left completely alone.
+            var params = this._params || [];
+            var wholeParty = (params.length === 0) || (Number(params[1]) === 0);
+            if (!wholeParty) return ok;
+
+            applyResultHpAfterHeal();
+            clearResultHp();
+            log('post-battle Recover All: quiz damage kept');
+        } catch (e) { log('recover guard failed', e); }
+        return ok;
     };
 
     // -------------------------------------------------------------------------
