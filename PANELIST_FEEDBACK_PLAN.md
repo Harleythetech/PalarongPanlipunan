@@ -170,6 +170,65 @@ save that already beat Shadow still lands on the blank page.
   than only the explanation, which is a long read for a student who just wanted
   the lesson repeated.
 
+### 3.2 Guidance: `CM` + `NavArrow` on every interaction (and why some stay blank)
+
+The build already had two guidance plugins, but almost always used only one of
+them:
+
+| Command | What it does |
+|---|---|
+| `NavArrow event N` | the floating arrow pointing at event N |
+| `CM N <objective>` | the OBJECTIVE panel: text, compass bearing and distance |
+
+At `f91fe01` there were **46** arrow commands but only **3** had a mission that
+pointed at the same event — and one of those three pointed somewhere else. The
+arrow said "talk to the elder", the panel said "talk to the elder", but its
+target id was the cave, so the compass and the distance meter sent the player in
+the opposite direction.
+
+`tools/add_navigation.js` pairs them. Result: **51 arrows and 51 missions across
+15 maps**, with the objective text written per target rather than derived from
+the event name. It also gives five interactions that ended in silence a
+hand-off:
+
+| Interaction | New hand-off |
+|---|---|
+| `Map034` ev10 Aling Sita's door | to the door tile (event 9) |
+| `Map038` ev2 Bahay-Kubo narration | to the exit (event 6) |
+| `Map044` ev2 Mang Siko | to his door (event 1) |
+| `Map047` ev5 Veyra (battle) | to the Bulwagan exit (event 3) |
+| `Map048` ev1 Kapitana Elena | to the Bulwagan exit (event 3) |
+
+And it fixes the `Map002` mismatch: the opening page now sets `CM 1`, agreeing
+with its `NavArrow event 1`.
+
+**Why it is additive.** Against `HEAD`: 53 commands inserted, 1 objective string
+corrected, **0 commands removed, 0 events added, 0 pages / conditions / triggers /
+images / positions changed** — proved by an LCS diff, not by inspection. Re-running
+the tool is a no-op.
+
+**What is deliberately not guided.** A dialogue event was left without a mission
+only when the game itself moves the player onward (an autorun scene that
+transfers, a player-touch transition tile, or a balloon reaction), or when it is
+ambient one-line flavour (`Jacob: Maligayang araw sa iyo.`). Pointing an arrow at
+nothing would be worse than leaving the panel blank, so those are untouched. The
+three remaining `Different way of answering` events (`Map046` ev20, `Map050` ev7,
+`Map052` ev4) are the original author's unfinished placeholders and were not
+given invented objectives.
+
+**Scope note.** Both plugins reset on every map transfer
+(`Scene_Map.onMapLoaded`), so guidance is per-map: the arrow is cleared and the
+mission is dropped when the map id changes. A room therefore shows no panel until
+its first interaction hands off. That is the plugins' own design, not a
+regression; the five rooms where the player lands on a redirect tile
+(`Map045`/`046`/`047`/`048`/`052`) re-issue the mission as soon as the player
+steps onto that tile. One known gap follows from the same design: leaving Aling
+Sita's house returns the player to `Map034` (5,10) on a tile whose page 2 is
+blank, and player-touch does not fire on a transfer landing, so that one return
+has no objective until the player talks to someone. It is a pre-existing layout
+quirk, not a regression, and fixing it would need a per-map autorun quest guide
+(§10).
+
 ---
 
 ## 4. Implementation
@@ -450,6 +509,9 @@ Item 6 (`candy`): icon 87, Filipino description, non-consumable, `occasion: 3`
 | `tools/verify_shuffle.js` | **new** — 3 000-permutation fuzz over the real troop data |
 | `tools/simulate_support.js` | **new** — headless MV runtime scenario tests |
 | `tools/simulate_battle.js` | **new** — enumerates every answer path, checks control flow and the damage curve |
+| `tools/add_navigation.js` | **new** — pairs `CM` with every `NavArrow`, fixes `Map002`, adds three hand-offs |
+| `tools/verify_navigation.js` | **new** — proves every arrow has a matching mission and both targets exist |
+| `data/Map002/034/035/038/042/043/044/045/046/047/048/049/050/052.json` | `CM` commands inserted beside existing `NavArrow`s (51 total, 5 new hand-offs) |
 | `data/_backup/*` | inert pre-panel snapshots (`DataManager` only reads `data/<Name>.json`) |
 
 ---
@@ -464,6 +526,8 @@ node tools/economy_check.js          # ECONOMY OK
 node tools/add_quiz_rewards.js --check   # map reward blocks still intact
 node tools/apply_minigame_gate.js --check # gate + mini-game reward still applied
 node tools/verify_minigame.js        # MINI-GAME OK
+node tools/add_navigation.js --check     # guidance already paired, no-op
+node tools/verify_navigation.js      # NAVIGATION OK (7 checks)
 ```
 
 `verify_shuffle.js` proves, for every permutation of every troop:
@@ -574,6 +638,25 @@ Run against the pre-fix data it fails three independent ways (the `Bulaklak`
 drift), and against the pre-gate data it fails twice more (`the battle is not
 gated on the mini-game counter`, `the mini-game grants no candy`).
 
+`verify_navigation.js` proves the guidance is complete and not merely present:
+
+- every `NavArrow event N` has a `CM N <objective>` in the same page, either
+  order accepted
+- every arrow and mission target is an event that **exists on that same map** —
+  both plugins resolve event ids map-locally, so a cross-map target would point
+  at nothing
+- no objective text is empty or a placeholder
+- every map that draws an arrow also shows a mission, and vice versa
+- the five former dead ends now hand the player off
+- `Map002`'s opening page no longer points the panel at the cave while the arrow
+  points at the elder
+
+Against the pre-change data it fails **50 of 52 checks**, so it is a real gate.
+
+The change itself was audited separately with an LCS diff: 53 insertions, 1
+intended string correction, nothing removed, and no event other than the ones
+named above differs from `HEAD`.
+
 ---
 
 ## 8. Rollback
@@ -643,6 +726,26 @@ These need the actual game window; the harness cannot render or read input.
     Shadow → the tile must start the battle, not the "go back" line (this is the
     soft-lock guard).
 20. Confirm `Troops.json` is still byte-identical: `git diff 21885e1 -- data/Troops.json`.
+21. **Guidance pairing.** In *Nayon ng Mayumi*, finish any villager's dialogue:
+    the OBJECTIVE panel and the floating arrow must point at the **same** next
+    person, and the panel text must name that person (e.g. `Kausapin si Mang
+    Isko`, `Tumawid sa ilog at hanapin si Mang Ambo`).
+22. **Opening page.** New game: the arrow points at the Matandang Tagapayo *and*
+    the panel reads `Makipag-usap kay Matandang Tagapayo` — not the cave. After
+    the flashback both must move to the trainer (`Pumunta at subukan ang iyong
+    kaalaman…`), and after the tutorial both must move to the cave.
+23. **Redirect tiles.** Step on a market stall (`Pamilihang Bayan`), a village
+    edge (`Liwayway`, `Balon`), or the Bulwagan entrance: the arrow and panel
+    must both jump to the same NPC, never one without the other.
+24. **Dead ends.** After Aling Sita's door dialogue, after the Bahay-Kubo
+    narration, after Mang Siko, after beating Veyra, and after Kapitana Elena, an
+    arrow must appear pointing to the door/exit they just named. Before this
+    change all five of those interactions ended with no arrow at all.
+25. **Return from Aling Sita's house.** This is the one return that still has no
+    objective (see §3.2, scope note). Confirm nothing is *broken*: the player
+    can walk, talk to a villager, and the next interaction re-issues guidance.
+    If the empty panel is judged too noticeable, the fix is the per-map autorun
+    quest guide listed in §10.
 
 Watch specifically for: the support card rendering on top of a sprite, and the
 `Kendi N` label width on the companion window in Filipino.
@@ -658,6 +761,7 @@ the panel answer does not depend on any of it landing.
 | Feature | Notes |
 |---|---|
 | **Treasure hunt** | 5 clue NPCs on an existing map; reuses `MissionTracker` `CM` + `NavArrow`; each clue behind a self-switch so it cannot be farmed. Event-only, zero engine risk. |
+| **Per-map quest guide** | One autorun event per map that re-issues the current `CM` + `NavArrow` on load, conditioned on the quest variables. This would close the one remaining blank return (§3.2) and mean a room never opens without an objective. It is deferred because an autorun that runs on every load is the highest-risk event type in the project: a wrong condition blocks movement. |
 | **Matching mini-game** | 8 pairs / 60 s, `Scene_PalMatch`; +2 per pair, +20 perfect. |
 | **Ordering puzzle** | Arrange a timeline; third priority. |
 | **Candy shop** | Extra hint 10 / heal 20 / revive 50 / cosmetic 100; needs `Scene_PalCandyShop` (the default shop only takes gold). The candy economy is already in place: the campaign awards 18 candy (180 points) — 16 from the six quizzes and 2 from the Mang Isko mini-game — enough for rank 2 and over half of rank 3, so a shop would have something to spend. |
@@ -682,4 +786,6 @@ the panel answer does not depend on any of it landing.
       guarded by `verify_minigame.js` — it answers comments #2 and #3
 - [x] The mini-game is enforced (Shadow battle gated on it) and pays candy, with
       no soft-lock for existing saves
+- [x] Every interaction sets **both** a `CM` mission and a `NavArrow` target
+      (51/51, up from 3/46) and all five silent dead ends hand off
 - [ ] In-engine playtest (§9) — **before the panel**
