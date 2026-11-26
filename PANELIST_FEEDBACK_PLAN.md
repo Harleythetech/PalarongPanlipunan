@@ -87,14 +87,68 @@ mismatch. The file on disk is untouched (verified byte-identical to `21885e1`).
 | # | Panel comment | Delivered |
 |---|---|---|
 | 1 | Reshuffle questions | In-memory block permutation **and** answer-option shuffle, re-drawn every battle |
+| 2 | Limited interactivity (mini games, bonus games) | **Already in the build**: the "Mang Isko" pick-three selection game in *Nayon ng Mayumi* — choose 3 of 6 examples of *kulturang materyal*, with per-option feedback, an anti-repeat guard and a retry loop. It gates the Shadow battle, so it sits in the critical path (§3.1) |
+| 3 | Another answer style | Two of them: the selection game above (pick-many instead of one answer), and answer-position shuffle inside every quiz |
 | 4 | Feedback system | SFX + screen flash/shake + floating score + Arkin reaction line + live tally on the HUD |
+| 4 | Damage curve | Correct answers 14–33, wrong answers scaled by quiz length (16 / 8 / 7, about half the party's HP if every answer is wrong); no single answer one-shots the enemy or the party, and no question is skipped |
 | 5 | Candy points | One **Candy Points** currency, earning rules, rank unlock at 100, counter in battle **and** on the map |
 | 6 | Arkin health / support | 0–100 support gauge, ranks 1–4, hint charges, exhausted state, per-battle recovery |
-| 4 | Damage curve | Correct answers 14–33, wrong answers scaled by quiz length (16 / 8 / 7, about half the party's HP if every answer is wrong); no single answer one-shots the enemy or the party, and no question is skipped |
-| 3 | Another answer style | Answer-position shuffle (choices presented in a different order each time) |
 
 Deferred: treasure hunt, matching mini-game, ordering puzzle, candy shop,
-question-pool expansion (§10).
+question-pool expansion (§10) — **all additions on top of the mini-game that
+already exists**, not replacements for it.
+
+### 3.1 The mini-game that was already there
+
+Comment #2 was carried as "not delivered" for most of this work until the build
+was audited for existing interactivity. It already has one, in the main quest:
+**Mang Isko**, `Map034` event 1 in *Nayon ng Mayumi*.
+
+The player is taught *kapaligiran* and *kultura*, then asked to name three
+examples of **kulturang materyal** from six options:
+
+| Option | Verdict | Why |
+|---|---|---|
+| Bahay (house) | correct | built by people |
+| Tulay (bridge) | correct | built by people |
+| Poste ng Ilaw (lamp post) | correct | built by people |
+| Damit (clothing) | correct | made by people |
+| Puno (tree) | wrong | part of nature |
+| Tubig (water) | wrong | part of nature |
+
+How it behaves:
+
+- **Pick three, not one.** It loops on a `Label` / `Jump to Label` pair until the
+  counter `Material_Count` (V2) reaches 3. A wrong answer costs time, not
+  progress: there is no dead end and no way to fail out of the quest.
+- **No double counting.** Each correct option owns a switch (`Bahay_Selected`,
+  `Tulay_Selected`, `Poste_Selected`, `Damit_Selected`); picking it again is
+  refused with *"Napili mo na ang … Pumili naman ng ibang halimbawa."*
+- **Per-option feedback.** Every option answers with its own reason — *"Tama! Ang
+  bahay ay halimbawa ng kulturang materyal."* versus *"Mali! Ang puno ay bahagi
+  ng kalikasan…"* — which is the feedback pattern comment #4 asks for, in a
+  non-quiz format.
+- **It gates the quiz.** Finishing it advances the quest to the Shadow battle,
+  so the interactivity is in the critical path rather than a side activity.
+
+**A real bug was found here and fixed.** The sixth option was labelled
+`Bulaklak` (flower) while its feedback still read *"Tama! Ang Damit na suot
+natin…"* and its switch was still `Damit_Selected` — the option had been renamed
+from "Damit" to "Bulaklak" without updating the text. That taught the wrong
+thing: a flower is nature, not material culture, so a student who answered
+correctly was told they were right about *clothing* they never picked. The label
+is back to **Damit**, which now agrees with its feedback text, its switch name
+and the lesson.
+
+**Could be improved (post-deadline, not started):**
+
+- It grants no reward, so it does not feed the Candy Points economy the way the
+  quiz victories now do.
+- It is a pick-many list, not a spatial or timed game; the treasure hunt and the
+  matching-pairs game in §10 would add variety.
+- The "Hindi pa rin po." retry branch replays the whole opening dialogue rather
+  than only the explanation, which is a long read for a student who just wanted
+  the lesson repeated.
 
 ---
 
@@ -388,6 +442,7 @@ node tools/simulate_support.js       # ALL CHECKS PASSED
 node tools/simulate_battle.js        # 7344 answer paths, 0 failures
 node tools/economy_check.js          # ECONOMY OK
 node tools/add_quiz_rewards.js --check   # map reward blocks still intact
+node tools/verify_minigame.js        # MINI-GAME OK
 ```
 
 `verify_shuffle.js` proves, for every permutation of every troop:
@@ -467,6 +522,24 @@ quiz battles (one fixed shuffle per battle, as in play):
 `add_quiz_rewards.js` is idempotent and refuses to edit a file whose events are
 not one-verbatim-JSON-per-line; re-running it finds nothing to do.
 
+`verify_minigame.js` proves the Mang Isko selection game still teaches what it
+claims to teach:
+
+- the menu cannot be cancelled, so a required story beat has no escape
+- every branch's feedback **names the option that was clicked** (the rule that
+  catches the `Bulaklak` / `Damit` drift above)
+- correct options are praised and wrong options are corrected, matching the score
+- the exit threshold (3) is reachable and not trivial (4 options are correct)
+- the pick counter is reset on entry, so a replay cannot start already complete
+- each correct option is recorded and cannot be counted twice
+- a wrong answer loops back instead of ending the event
+- completion sets a self switch, so the game cannot be replayed for free
+- the four correct answers are exactly the man-made ones, and the switch names
+  still agree with the option labels
+
+Run against the pre-fix data it fails three independent ways, so it is a real
+gate rather than a formality.
+
 ---
 
 ## 8. Rollback
@@ -520,7 +593,11 @@ These need the actual game window; the harness cannot render or read input.
 14. Load an **old** save (`save/file1.rpgsave`) → no crash, support initialises
     to full on the next battle.
 15. Mobile scale 1.4: card and map counter do not overlap other HUD elements.
-16. Confirm `Troops.json` is still byte-identical: `git diff 21885e1 -- data/Troops.json`.
+16. Play **Mang Isko** in *Nayon ng Mayumi*: pick `Puno` or `Tubig` first → told
+    `Mali!` and asked again; pick `Bahay` twice → the second pick is refused;
+    pick `Bahay`, `Tulay`, `Damit` → the quest advances to the Shadow battle. The
+    fourth option must read **`Damit`**, never `Bulaklak`.
+17. Confirm `Troops.json` is still byte-identical: `git diff 21885e1 -- data/Troops.json`.
 
 Watch specifically for: the support card rendering on top of a sprite, and the
 `Kendi N` label width on the companion window in Filipino.
@@ -529,8 +606,12 @@ Watch specifically for: the support card rendering on top of a sprite, and the
 
 ## 10. Deferred (post-deadline)
 
+The build already has one mini-game (§3.1). Everything below is an **addition**,
+not a replacement, so the panel answer does not depend on any of it landing.
+
 | Feature | Notes |
 |---|---|
+| **Mang Isko reward** | It currently grants nothing. One `candy` grant in its completion branch would make it pay into the Candy Points economy like the quiz victories do. |
 | **Treasure hunt** | 5 clue NPCs on an existing map; reuses `MissionTracker` `CM` + `NavArrow`; each clue behind a self-switch so it cannot be farmed. Event-only, zero engine risk. |
 | **Matching mini-game** | 8 pairs / 60 s, `Scene_PalMatch`; +2 per pair, +20 perfect. |
 | **Ordering puzzle** | Arrange a timeline; third priority. |
@@ -552,4 +633,6 @@ Watch specifically for: the support card rendering on top of a sprite, and the
 - [x] Old saves tolerated (append-only variables, `fresh` detection)
 - [x] Every quiz victory grants an announced Potion + candy; the campaign is
       provably winnable on the worst passing path (`economy_check.js`)
+- [x] Existing selection mini-game audited, its label/feedback bug fixed, and
+      guarded by `verify_minigame.js` — it answers comments #2 and #3
 - [ ] In-engine playtest (§9) — **before the panel**
