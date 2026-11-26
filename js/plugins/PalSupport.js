@@ -80,7 +80,10 @@
  *   PalSupport quizdone <total> <pass>
  *       Evaluates the quiz. Injected automatically by PalQuiz at the end of
  *       the shuffled question chain. Passing zeroes the troop's HP so the
- *       engine ends the battle through the normal victory path.
+ *       engine ends the battle through the normal victory path; failing knocks
+ *       the party out so the engine runs its normal defeat path, then restores
+ *       the HP the party had earned. The damage from wrong answers is therefore
+ *       permanent, like a normal battle.
  *
  *   PalSupport hint
  *       Charges one hint to the player. Injected automatically by PalQuiz at
@@ -140,10 +143,11 @@
     ];
 
     // Set when the quiz was failed and the party was knocked out on purpose, so
-    // the engine runs its normal defeat path. The endBattle hook then heals them
-    // back up: the engine only revives to 1 HP and most maps' "If Lose" branches
-    // never heal, which would leave the player walking around at 1 HP.
+    // the engine runs its normal defeat path. Also holds the HP each member had
+    // earned when the quiz ended: the knockout is what ends the battle, but the
+    // damage from the wrong answers is what the player walks away with.
     var quizDefeat = false;
+    var defeatHp = null;
 
     // -------------------------------------------------------------------------
     // Helpers
@@ -342,14 +346,27 @@
             return;
         }
 
-        // Failed round. The quiz is finished, so the fight has to end — but it
-        // must end as a real, visible defeat rather than stopping dead while
-        // everyone is still standing. Knock the party out and let the engine's
-        // own defeat path take over: it plays the defeat ME and message, then
-        // runs the map's existing "If Lose" branch (Arkin offers a retry).
-        // Safe because every one of these battles is started with canLose=true,
-        // and the tutorial's "Game Over" command is stripped by PalQuiz.
+        // Failed round. The quiz is finished, so the fight has to end — and it
+        // has to end with the party actually knocked out, so the player sees a
+        // real defeat instead of a fight that stops with everyone standing.
+        // Remember the HP they earned first: the knockout ends the battle, but
+        // the damage from the wrong answers is what they keep afterwards.
+        // The tutorial's "Game Over" command is stripped by PalQuiz.
+        defeatHp = [];
+        try {
+            $gameParty.members().forEach(function (m) {
+                if (m) defeatHp.push({ actor: m, hp: m.hp });
+            });
+        } catch (e) { defeatHp = null; }
+
         quizDefeat = true;
+
+        // The quiz itself decides the loss, so never let it fall through to the
+        // game over screen even if the map event was authored without
+        // "can lose". With canLose the engine revives the party and pops back to
+        // the map; the restore below then applies the HP they earned.
+        try { BattleManager._canLose = true; } catch (e) { /* ignore */ }
+
         try {
             $gameParty.members().forEach(function (m) {
                 if (m && !m.isDead()) m.gainHp(-m.hp);
@@ -610,6 +627,7 @@
             sv(C.streakVar, 0);
             sv(C.accuracyVar, 0);
             quizDefeat = false;
+            defeatHp = null;
 
             var points = gv(C.pointsVar);
             var rank   = rankFor(points);
@@ -636,22 +654,29 @@
         } catch (e) { log('battle setup failed', e); }
     };
 
-    // A failed quiz leaves the party at 0 HP so the engine runs its normal
-    // defeat path (defeat ME + message + the map's "If Lose" branch). Heal them
-    // once that path has been chosen; otherwise the engine's own
-    // reviveBattleMembers() only sets 1 HP and the player walks the map at 1 HP.
-    var _BattleManager_endBattle = BattleManager.endBattle;
-    BattleManager.endBattle = function (result) {
-        _BattleManager_endBattle.apply(this, arguments);
+    // A failed quiz knocks the party out so the engine runs its normal defeat
+    // path (defeat ME + defeat message + the map's "If Lose" branch). The
+    // knockout must not also erase the damage: once the battle is over, each
+    // member goes back to the HP they had earned, so a wrong answer costs health
+    // on the map exactly like a normal battle.
+    //
+    // Restored here, after the engine has finished with the battle, so the HUD
+    // still shows the party dead for the whole defeat message. Never leave
+    // anyone at 0: 0 HP on the map is the game over screen.
+    var _BattleManager_updateBattleEnd = BattleManager.updateBattleEnd;
+    BattleManager.updateBattleEnd = function () {
+        _BattleManager_updateBattleEnd.apply(this, arguments);
         try {
             if (!quizDefeat) return;
             quizDefeat = false;
-            if (result === 0) return;              // safety: never touch a won fight
-            $gameParty.members().forEach(function (m) {
-                if (m) m.recoverAll();
+            var earned = defeatHp;
+            defeatHp = null;
+            (earned || []).forEach(function (e) {
+                if (!e || !e.actor) return;
+                e.actor.setHp(Math.max(1, Math.min(e.actor.mhp, e.hp)));
             });
-            log('quiz defeat: party healed');
-        } catch (e) { log('post-defeat heal failed', e); }
+            log('quiz defeat: party keeps the damage it took');
+        } catch (e) { log('post-defeat restore failed', e); }
     };
 
     // -------------------------------------------------------------------------

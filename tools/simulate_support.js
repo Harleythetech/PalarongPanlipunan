@@ -75,8 +75,29 @@ function makeRuntime(pluginParams) {
     const BattleManager = {
         _phase: 'start',
         _result: null,
-        setup() { this._phase = 'start'; },
-        endBattle(result) { this._result = result; }
+        _canLose: false,
+        gameover: false,
+        pops: 0,
+        setup(troopId, canEscape, canLose) {
+            this._phase = 'start';
+            this._result = null;
+            this._canLose = canLose === true;
+        },
+        endBattle(result) { this._result = result; this._phase = 'battleEnd'; },
+        // Mirrors MV: a dead party is either revived (canLose) or sent to the
+        // game over screen, then the scene pops.
+        updateBattleEnd() {
+            const dead = party.members().every(m => m.isDead());
+            if (this._result !== 1 && dead) {
+                if (this._canLose) {
+                    party.members().forEach(m => { if (m.isDead()) m.setHp(1); });
+                } else {
+                    this.gameover = true;
+                }
+            }
+            this.pops++;
+            this._phase = null;
+        }
     };
 
     const sandbox = {
@@ -274,25 +295,87 @@ console.log('\nPalSupport — quiz outcome');
     L.vars[6] = 1;
     L.vars[7] = 6;
     L.party._m[0].hp = 30;                        // damaged by the quiz's own commands
+    L.party._m[1].hp = 55;
     L.interpreter.cmd('PalSupport', 'quizdone', '7', '4');
 
     eq('failed quiz knocks the party out so the engine sees a defeat', L.party._m[0].hp, 0);
     eq('second member is knocked out too', L.party._m[1].hp, 0);
     eq('failed quiz does not end the battle itself (engine does)', L.BattleManager._result, null);
 
-    // The engine's defeat path then calls endBattle(2); the hook heals them.
+    // The engine's defeat path then calls endBattle(2) and updateBattleEnd().
     L.BattleManager.endBattle(2);
-    eq('party healed after the quiz defeat', L.party._m[0].hp, 100);
-    eq('party MP healed after the quiz defeat', L.party._m[0].mp, 10);
-    eq('second member healed too', L.party._m[1].hp, 80);
-    eq('a won fight is never touched by the heal hook', (function () {
+    check('the death is still on screen while the defeat message plays',
+        L.party._m[0].isDead() && L.party._m[1].isDead());
+    L.BattleManager.updateBattleEnd();
+    eq('wrong answers leave a real health cost after the defeat', L.party._m[0].hp, 30);
+    eq('the second member keeps its damage too', L.party._m[1].hp, 55);
+    check('nothing is left dead on the map after the defeat',
+        !L.party._m[0].isDead() && !L.party._m[1].isDead());
+    check('the battle exited normally, no game over', L.BattleManager.gameover === false && L.BattleManager.pops === 1);
+
+    // Someone already knocked out mid-quiz must come back at 1, never 0:
+    // 0 HP on the map is the game over screen.
+    eq('a knocked-out member is revived to 1 HP, not left dead', (function () {
+        const Z = makeRuntime(PARAMS);
+        Z.BattleManager.setup(4, false, true);
+        Z.vars[6] = 1;
+        Z.vars[7] = 6;
+        Z.party._m[0].hp = 7;
+        Z.party._m[1].hp = 0;                     // died on a wrong answer mid-quiz
+        Z.interpreter.cmd('PalSupport', 'quizdone', '7', '4');
+        Z.BattleManager.endBattle(2);
+        Z.BattleManager.updateBattleEnd();
+        return Z.party._m[1].hp;
+    })(), 1);
+
+    // And the damage must survive to the map for a survivor as usual.
+    eq('the survivor still keeps its own HP', (function () {
+        const Z = makeRuntime(PARAMS);
+        Z.BattleManager.setup(4, false, true);
+        Z.vars[6] = 1;
+        Z.vars[7] = 6;
+        Z.party._m[0].hp = 7;
+        Z.party._m[1].hp = 0;
+        Z.interpreter.cmd('PalSupport', 'quizdone', '7', '4');
+        Z.BattleManager.endBattle(2);
+        Z.BattleManager.updateBattleEnd();
+        return Z.party._m[0].hp;
+    })(), 7);
+
+    // A quiz authored without "can lose" must still never reach game over.
+    const V = makeRuntime(PARAMS);
+    V.BattleManager.setup(4, false, false);       // canLose = false
+    V.vars[6] = 0;
+    V.interpreter.cmd('PalSupport', 'quizdone', '7', '4');
+    check('a quiz loss forces canLose so the game over screen is unreachable',
+        V.BattleManager._canLose === true);
+    V.BattleManager.endBattle(2);
+    V.BattleManager.updateBattleEnd();
+    check('no game over is reached', V.BattleManager.gameover === false);
+    check('the party is alive again after the exit', !V.party._m[0].isDead());
+
+    eq('a won fight is never touched by the defeat hook', (function () {
         const W2 = makeRuntime(PARAMS);
         W2.BattleManager.setup(1, false, true);
         W2.interpreter.cmd('PalBattleHUD', 'score', 'add', '1');
         W2.party._m[0].hp = 37;
         W2.BattleManager.endBattle(0);
+        W2.BattleManager.updateBattleEnd();
         return W2.party._m[0].hp;
     })(), 37);
+
+    // A decided quiz cannot be replayed into the hook: setup clears it.
+    eq('a stale defeat never leaks into the next battle', (function () {
+        const N = makeRuntime(PARAMS);
+        N.BattleManager.setup(4, false, true);
+        N.vars[6] = 0;
+        N.interpreter.cmd('PalSupport', 'quizdone', '7', '4');
+        N.party._m[0].hp = 80;                    // hypothetically healed between fights
+        N.BattleManager.setup(4, false, true);    // next battle starts
+        N.BattleManager.endBattle(2);
+        N.BattleManager.updateBattleEnd();
+        return N.party._m[0].hp;
+    })(), 80);
 
     // Without the injected threshold the command still has a safe default.
     const D = makeRuntime(PARAMS);

@@ -192,15 +192,34 @@ Rewritten in the runtime copy only:
 
 - **Pass** (at least `steps` correct answers): `quizdone` applies the finisher, so
   the enemy dies at the very end and the engine's normal victory path runs the
-  existing `If Win` branch. No question is ever skipped.
+  existing `If Win` branch. No question is ever skipped. The party keeps whatever
+  HP it has left, exactly like a won battle.
 - **Fail** (fewer than `steps` correct): the party is knocked out so the engine
   runs its **normal defeat path** — defeat ME, defeat message, actor collapse —
   which fires the existing `If Lose` branch (Arkin: "magbasa muna tayo ng mga
-  tala…"). The `endBattle` hook then restores the party, because the engine only
-  revives to 1 HP and those `If Lose` branches never heal.
+  tala…").
+- **Damage is not free.** `quizdone` records each member's HP before the knockout;
+  once the battle actually exits (`BattleManager.updateBattleEnd`), each member is
+  put back on it (floored at 1 HP). So a wrong answer costs real health on the
+  map, the same way it would in a normal battle. The old behaviour healed the
+  party to full after a loss, which made the quiz damage meaningless. The restore
+  runs at exit, not at defeat, so the HUD still shows the party dead for the whole
+  defeat message — the battle visibly ends with a knockout.
+- A member that actually hit 0 HP mid-quiz comes back at 1 HP, never 0: 0 HP on
+  the map is the game over screen.
+- A failed quiz forces `canLose` on for that battle, so even a map event authored
+  without "can lose" can never send the player to the title screen.
 - `quizdone` receives both the total and the pass threshold
   (`PalSupport quizdone <total> <pass>`), so the data and the plugin can never
   disagree. A missing threshold defaults to half the questions.
+
+> **Why the knockout still has to happen.** `If Lose` is chosen by
+> `BattleManager.endBattle(2)`, and the engine only reaches the defeat message
+> when the party is actually dead. Leaving the party standing and calling
+> `endBattle(2)` directly stopped the fight mid-air with no defeat at all — the
+> bug found in playtesting. The knockout is what produces the death, the defeat
+> message and the `If Lose` branch; the HP restore afterwards is what makes the
+> damage stick.
 
 > **The `Game Over` trap.** `Troops.json` troop 1 has two `Game Over` event
 > commands (L125/L132) on the *final* question's wrong answers. They fire
@@ -211,7 +230,7 @@ Rewritten in the runtime copy only:
 > `21885e1`.
 
 This is strictly better than before: no invisible-command-window state, no dead
-party on the map, and no early end to the quiz.
+party on the map, no early end to the quiz, and losing a quiz now costs HP.
 
 ### 4.5 Map HUD
 
@@ -295,7 +314,10 @@ node tools/simulate_battle.js        # 7344 answer paths, 0 failures
 - next battle → 25 support, hints refilled
 - hint costs 10 points + 10 support
 - won quiz leaves the party alone; failed quiz knocks them out and the
-  `endBattle` hook restores them
+  `updateBattleEnd` hook puts them back on the HP they had earned, so the wrong
+  answers still cost health afterwards
+- a member knocked out mid-quiz comes back at 1 HP, never 0 (no game over loop)
+- a stale defeat flag never leaks into the next battle
 - candy adds 10 points each
 - kill switch suppresses everything
 - `BattleManager.setup` rewrites the page **in memory only**; `Troops.json`
@@ -347,9 +369,10 @@ These need the actual game window; the harness cannot render or read input.
    positions; `Item3` + green flash + `+10` pop on a correct answer.
 2. Each of the six bosses: completes, card shows `Kendi`, support gauge, tally.
 3. Replay a boss three times → three different orders; no repeats inside one run.
-4. Answer everything wrong → `KULANG PA`, Arkin's "magbasa muna tayo" line, and
-   the party is alive on the map afterwards. Each wrong answer should take a
-   small, equal slice of HP — never knock anyone out in one hit.
+4. Answer everything wrong → `KULANG PA`, the defeat message, Arkin's "magbasa
+   muna tayo" line, and the party on the map **missing the HP the wrong answers
+   cost** (not healed to full). Each wrong answer should take a small, equal
+   slice of HP — never knock anyone out in one hit at full health.
 5. Lose seven answers' worth of support → card reads `WALA`, the hint option
    refuses ("Naubos na ang aking mga tala").
 6. Reach 100 points → rank badge flips to `GABAY`.
