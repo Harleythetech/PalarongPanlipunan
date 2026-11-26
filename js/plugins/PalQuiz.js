@@ -36,11 +36,15 @@
  * @type number
  * @decimals 2
  * @default 0.5
+ * @desc Share of the questions that must be answered correctly to win.
  *
  * @param wrongDamageShare
  * @type number
  * @decimals 2
- * @default 0.1
+ * @default 0.5
+ * @desc Share of the party's health a whole quiz costs when every answer is
+ * wrong. It is split evenly over the questions, so a 3-question quiz takes more
+ * per mistake than a 7-question one and the total stays the same.
  *
  * @param Debug Logging
  * @default false
@@ -100,10 +104,10 @@ var PalQuizCore = (function () {
     var SPEAKER_RE = /^[^:\n]{1,24}:\s*["'\u201c\u201d]?\s*/;
     var COMMENT_RE = /^\/\/\s*(first|second|third|fourth|fifth|sixth|seventh|last|question|unang|ikalawa|ikatlo)/i;
 
-    // Damage balancing defaults. Half the answers right is a pass; one wrong
-    // answer costs a tenth of the party's HP.
+    // Damage balancing defaults. Half the answers right is a pass; a quiz that
+    // is answered entirely wrong costs half the party's health in total.
     var DEFAULT_PASS_RATIO = 0.5;
-    var DEFAULT_WRONG_SHARE = 0.1;
+    var DEFAULT_WRONG_SHARE = 0.5;
 
     function clone(cmd) {
         return {
@@ -436,18 +440,26 @@ var PalQuizCore = (function () {
     // instant knockout, and the earlier steps (25, 50 on a 3-question quiz)
     // swing just as hard. The curve is all-or-nothing rather than a curve.
     //
-    // Replacement rule:
+    // Replacement rule, both sides scaled by the number of questions so a short
+    // quiz and a long quiz carry comparable stakes:
+    //
     //   correct -> floor((enemyMaxHp - 1) / questions)
     //              Every correct answer is visible but can never be lethal on
     //              its own. MV ends the battle the instant the last enemy dies,
     //              which would cut the quiz short and skip the PalSupport
     //              quizdone command at the end of the page. The killing blow is
     //              applied once by quizdone, after the score is known.
-    //   wrong   -> round(partyMaxHp * wrongDamageShare), flat.
-    //              A tenth of the party's HP by default: readable, and no
-    //              single wrong answer can knock anyone out.
+    //              Answering everything right always leaves the enemy on 1 HP,
+    //              whatever the quiz length.
     //
-    // Returns {enemy, party, steps, passRatio}.
+    //   wrong   -> max(1, floor(partyMaxHp * wrongDamageShare / questions))
+    //              `wrongDamageShare` is the share of the party's health that a
+    //              *whole quiz* costs if every answer is wrong, so the damage is
+    //              split evenly over however many questions the battle has. A
+    //              3-question quiz and a 7-question quiz cost the same total, and
+    //              each individual question costs more in the short one.
+    //
+    // Returns {enemy, party, steps, passRatio, wrongTotal}.
     function damagePlan(questions, opts) {
         opts = opts || {};
         var n = Math.max(1, Number(questions) || 1);
@@ -460,7 +472,7 @@ var PalQuizCore = (function () {
 
         var share = Number(opts.wrongDamageShare);
         if (!(share > 0)) share = DEFAULT_WRONG_SHARE;
-        share = Math.min(0.5, share);
+        share = Math.min(0.9, share);
 
         // How many correct answers are required. Half of an odd number of
         // questions rounds up, so 7 questions needs 4.
@@ -469,10 +481,21 @@ var PalQuizCore = (function () {
         // Enough to move the bar, never enough to end the battle.
         var enemy = Math.max(1, Math.floor((enemyMax - 1) / n));
 
-        var party = Math.max(1, Math.round(partyMax * share));
+        // The whole quiz's budget, split across the questions. floor keeps the
+        // total under the budget instead of over it.
+        var budget = Math.max(1, Math.floor(partyMax * share));
+        var party = Math.max(1, Math.floor(budget / n));
+        // A question always has to cost something, but never enough to end a
+        // full-health member: the split can not reach the party's whole pool.
         if (party >= partyMax) party = Math.max(1, partyMax - 1);
 
-        return { enemy: enemy, party: party, steps: steps, passRatio: pass };
+        return {
+            enemy: enemy,
+            party: party,
+            steps: steps,
+            passRatio: pass,
+            wrongTotal: Math.min(party * n, partyMax - 1)
+        };
     }
 
     function transform(list, rng, opts) {
@@ -604,7 +627,7 @@ var PalQuizCore = (function () {
         softenGameOver: bool('softenGameOver', true),
         normalizeDamage: bool('normalizeDamage', true),
         passRatio: num('passRatio', 0.5),
-        wrongDamageShare: num('wrongDamageShare', 0.1),
+        wrongDamageShare: num('wrongDamageShare', 0.5),
         debug: bool('Debug Logging', false)
     };
 

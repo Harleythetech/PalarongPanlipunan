@@ -11,6 +11,9 @@
 //   - the damage curve is sane: no answer kills the enemy mid-quiz, no single
 //     wrong answer can knock out a party member, and quizdone carries the
 //     number of correct answers needed to pass
+//   - the damage is scaled by the question count: the same total health is at
+//     stake in a 3-question quiz and a 7-question quiz, so the per-answer cost
+//     differs between them
 //   - no jump target is missing
 //
 // Hint branches are excluded from the enumeration because they intentionally
@@ -30,10 +33,15 @@ const enemies = JSON.parse(fs.readFileSync(path.join(ROOT, 'data', 'Enemies.json
 
 const PARTY_MAX_HP = 100;   // Harold at level 1
 const PASS_RATIO = 0.5;
-const WRONG_SHARE = 0.1;
+const WRONG_SHARE = 0.5;    // the whole quiz's cost if every answer is wrong
 
 let failures = 0;
 let paths = 0;
+
+// What each quiz length costs when every answer is wrong, so the totals can be
+// compared across lengths at the end.
+const totals = [];
+const perAnswerByLength = {};
 
 // -----------------------------------------------------------------------------
 // Minimal event interpreter: just enough to follow the quiz control flow.
@@ -262,8 +270,27 @@ for (const troop of troops) {
         const scores = [...damageByCorrect.keys()].sort((a, b) => a - b);
 
         console.log(`      correct: ${plan.enemy} dmg (never lethal)  ->  ${plan.steps}/${nQuestions} right passes`);
-        console.log(`      wrong:   ${plan.party} dmg  ->  ${nQuestions} wrong = ${plan.party * nQuestions}/${PARTY_MAX_HP} HP`);
+        console.log(`      wrong:   ${plan.party} dmg  ->  all ${nQuestions} wrong = ${plan.party * nQuestions}/${PARTY_MAX_HP} HP`);
         console.log(`      max enemy damage ${maxDamage}/${enemyMaxHp}; scores reached ${scores.join('/')}`);
+
+        // The same total budget has to come out of every quiz, whatever its
+        // length: that is the point of scaling the damage by the question count.
+        const budget = Math.floor(PARTY_MAX_HP * WRONG_SHARE);
+        const totalWrong = plan.party * nQuestions;
+        if (totalWrong > budget) {
+            console.error(`      FAIL: ${nQuestions} wrong answers cost ${totalWrong}, over the ${budget} budget`);
+            failures++;
+        }
+        if (totalWrong < budget - nQuestions) {
+            console.error(`      FAIL: ${nQuestions} wrong answers cost only ${totalWrong} of a ${budget} budget`);
+            failures++;
+        }
+        if (plan.party !== Math.max(1, Math.floor(budget / nQuestions))) {
+            console.error(`      FAIL: per-answer damage ${plan.party} does not match budget ${budget} / ${nQuestions}`);
+            failures++;
+        }
+        totals.push(totalWrong);
+        perAnswerByLength[nQuestions] = plan.party;
 
         // Every possible score must be reachable.
         const all = [];
@@ -312,6 +339,43 @@ function mulberry32(seed) {
         t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
         return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
     };
+}
+
+// Cross-length check: the scaled damage has to make quiz length irrelevant to
+// the total stake.
+{
+    const lengths = Object.keys(perAnswerByLength).map(Number).sort((a, b) => a - b);
+    const budget = Math.floor(PARTY_MAX_HP * WRONG_SHARE);
+    console.log('\nall-wrong cost by quiz length:');
+    for (const n of lengths) {
+        const per = perAnswerByLength[n];
+        console.log(`      ${n} questions: ${per} dmg each = ${per * n}/${PARTY_MAX_HP}`);
+    }
+
+    // Short and long quizzes must differ per answer, or the damage is still flat.
+    const distinct = new Set(lengths.map(n => perAnswerByLength[n]));
+    if (lengths.length > 1 && distinct.size === 1) {
+        console.error('      FAIL: per-answer damage is identical for every quiz length (not scaled)');
+        failures++;
+    }
+
+    // ...and every length has to land on the same total, within one answer of
+    // the budget (floor division).
+    for (const n of lengths) {
+        const total = perAnswerByLength[n] * n;
+        if (total > budget || total < budget - n) {
+            console.error(`      FAIL: ${n} questions cost ${total}, expected about ${budget}`);
+            failures++;
+        }
+    }
+
+    // A longer quiz must never cost more per answer than a shorter one.
+    for (let i = 1; i < lengths.length; i++) {
+        if (perAnswerByLength[lengths[i]] > perAnswerByLength[lengths[i - 1]]) {
+            console.error('      FAIL: a longer quiz costs more per answer than a shorter one');
+            failures++;
+        }
+    }
 }
 
 console.log(`\n${paths} paths simulated, ${failures} failure(s)`);

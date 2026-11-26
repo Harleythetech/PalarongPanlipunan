@@ -90,7 +90,7 @@ mismatch. The file on disk is untouched (verified byte-identical to `21885e1`).
 | 4 | Feedback system | SFX + screen flash/shake + floating score + Arkin reaction line + live tally on the HUD |
 | 5 | Candy points | One **Candy Points** currency, earning rules, rank unlock at 100, counter in battle **and** on the map |
 | 6 | Arkin health / support | 0–100 support gauge, ranks 1–4, hint charges, exhausted state, per-battle recovery |
-| 4 | Damage curve | Correct answers 14–33, wrong answers a flat 10 %; no single answer one-shots the enemy or the party, and no question is skipped |
+| 4 | Damage curve | Correct answers 14–33, wrong answers scaled by quiz length (16 / 8 / 7, about half the party's HP if every answer is wrong); no single answer one-shots the enemy or the party, and no question is skipped |
 | 3 | Another answer style | Answer-position shuffle (choices presented in a different order each time) |
 
 Deferred: treasure hunt, matching mini-game, ordering puzzle, candy shop,
@@ -169,15 +169,21 @@ Rewritten in the runtime copy only:
 | Event | Formula | 3 questions | 6 questions | 7 questions |
 |---|---|---|---|---|
 | Correct answer | `floor((enemyMaxHp − 1) / questions)` | 33 | 16 | 14 |
-| Wrong answer | `round(partyMaxHp × wrongDamageShare)` | 10 | 10 | 10 |
+| Wrong answer | `max(1, floor(partyMaxHp × wrongDamageShare / questions))` | 16 | 8 | 7 |
 | Answers needed to pass | `ceil(passRatio × n)` | 2/3 | 3/6 | 4/7 |
 | Enemy HP left after all correct | `enemyMaxHp − n × damage` | 1 | 4 | 2 |
+| HP lost if every answer is wrong | `n × wrong damage` | 48/100 | 48/100 | 49/100 |
 
 - Every correct answer is deliberately **non-lethal**. MV ends the battle the
   moment the last enemy dies; a lethal answer would cut the quiz short and skip
   the `quizdone` command at the end of the page. The killing blow is applied once
   by `quizdone`, after the score is known.
-- `passRatio` defaults to `0.5`; `wrongDamageShare` to `0.1`.
+- Both sides are scaled by the number of questions, so quiz length does not
+  change the size of the stake. `wrongDamageShare` is the share of the party's
+  health that a *whole quiz* costs if every answer is wrong (default `0.5`), and
+  it is split evenly over however many questions the battle has: a 3-question
+  quiz costs 16 per mistake, a 6-question quiz 8, a 7-question quiz 7 — always
+  about half the party's health in total. `passRatio` defaults to `0.5`.
 - Enemy HP is read from `Enemies.json` (highest member, because `Change Enemy HP`
   targets every enemy at once).
 - Party HP is read from the frailest battle member, so one wrong answer can never
@@ -261,7 +267,8 @@ wrong → more damage → lower HP).
 
 - A wrong answer costs HP **as it happens**, through the troop page's own
   `Change HP` command, so the party bars drop during the quiz.
-- The HP cost is announced with a floating `-10 HP` next to the answer, measured
+- The HP cost is announced with a floating `-N HP` next to the answer (16 in the
+  three-question tutorial, 7–8 in the longer quizzes), measured
   as the difference between the last two answers. Nothing is hard-coded, so if a
   branch is ever re-authored the number follows the data. The Arkin gauge is
   reported separately (`Arkin -15`) so it is not mistaken for health.
@@ -364,7 +371,7 @@ node tools/simulate_battle.js        # 7344 answer paths, 0 failures
   (inn, save point) all still heal fully, even one second later
 - a member knocked out mid-quiz comes back at 1 HP, never 0 (no game over loop)
 - a stale defeat flag never leaks into the next battle
-- each answer announces the HP it actually cost (`-10 HP`), separately from the
+- each answer announces the HP it actually cost (`-N HP`), separately from the
   Arkin gauge (`Arkin -15`); a correct answer announces no HP change; a branch
   heal is announced as `+N HP`
 - a potion heals normally after a quiz, is never rolled back, and the healed HP
@@ -386,14 +393,14 @@ quiz battles (one fixed shuffle per battle, as in play):
 - the enemy **never** dies mid-quiz, so all questions are always asked
 - `quizdone` carries the right total and pass threshold
 - every score from `0` to `n` is reachable
-- one wrong answer costs `10 %` of the frailest member's HP, so it can never
-  cause a knockout
+- one wrong answer costs `floor(50 % of the party's HP / questions)`, so a
+  quiz-length quiz and a short quiz cost the same in total
 
-| Troop | Questions | Damage/correct | Answers to pass | Max enemy damage | Damage/all-wrong |
-|---|---|---|---|---|---|
-| 1, 2 | 3 | 33 | 2 | 99/100 | 30/100 |
-| 3, 5, 6 | 7 | 14 | 4 | 98/100 | 70/100 |
-| 4 | 6 | 16 | 3 | 96/100 | 60/100 |
+| Troop | Questions | Damage/correct | Damage/wrong | Answers to pass | Max enemy damage | Damage if all wrong |
+|---|---|---|---|---|---|---|
+| 1, 2 | 3 | 33 | 16 | 2 | 99/100 | 48/100 |
+| 3, 5, 6 | 7 | 14 | 7 | 4 | 98/100 | 49/100 |
+| 4 | 6 | 16 | 8 | 3 | 96/100 | 48/100 |
 
 ---
 
@@ -421,8 +428,8 @@ These need the actual game window; the harness cannot render or read input.
    positions; `Item3` + green flash + `+10` pop on a correct answer.
 2. Each of the six bosses: completes, card shows `Kendi`, support gauge, tally.
 3. Replay a boss three times → three different orders; no repeats inside one run.
-4. A wrong answer shows **both** `-10 HP` and `Arkin -15`, and the party bars
-   drop by the `-10` · the two must not be confused with each other.
+4. A wrong answer shows **both** `-16 HP` (tutorial) and `Arkin -15`, and the
+   party bars drop by the `-16` · the two must not be confused with each other.
 5. Answer everything wrong → `KULANG PA`, the defeat message, Arkin's "magbasa
    muna tayo" line, and the party on the map **missing the HP the wrong answers
    cost** (not healed to full by the branch's `Recover All`). Each wrong answer
