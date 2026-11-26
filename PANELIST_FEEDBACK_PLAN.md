@@ -207,6 +207,15 @@ Rewritten in the runtime copy only:
   defeat message — the battle visibly ends with a knockout.
 - A member that actually hit 0 HP mid-quiz comes back at 1 HP, never 0: 0 HP on
   the map is the game over screen.
+- **A wiped party cannot win.** Damage carries between battles now, so it is
+  possible to enter a quiz at low HP and be knocked out mid-round. The quiz still
+  runs to the end (MV does not check the party while a troop event is running),
+  and at `quizdone` an all-dead party is sent down the defeat path **even if the
+  score passes**. Otherwise a dead party could collect a victory.
+- **A won quiz revives its casualties at 1 HP.** Outside the tutorial no map heals
+  and no shop sells a revive item (`Stimulant` exists but is not sold anywhere),
+  so leaving a knocked-out member dead after a win would strand that member for
+  the rest of the game. They get up at 1 HP — the damage still shows.
 - A failed quiz forces `canLose` on for that battle, so even a map event authored
   without "can lose" can never send the player to the title screen.
 - `quizdone` receives both the total and the pass threshold
@@ -229,8 +238,8 @@ Rewritten in the runtime copy only:
 > `softenGameOver`, default on). `data/Troops.json` is still byte-identical to
 > `21885e1`.
 
-This is strictly better than before: no invisible-command-window state, no dead
-party on the map, no early end to the quiz, and losing a quiz now costs HP.
+This is strictly better than before: no invisible-command-window state, no
+stranded dead member, no early end to the quiz, and losing a quiz now costs HP.
 
 ### 4.5 Map HUD
 

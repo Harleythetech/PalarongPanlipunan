@@ -53,6 +53,7 @@ function makeRuntime(pluginParams) {
 
     const party = {
         members() { return this._m; },
+        isAllDead() { return this._m.every(m => m.isDead()); },
         _m: [
             { hp: 100, mhp: 100, mp: 10, mmp: 10, isDead() { return this.hp === 0; }, gainHp(n) { this.hp += n; }, setHp(n) { this.hp = n; }, setMp(n) { this.mp = n; }, recoverAll() { this.hp = this.mhp; this.mp = this.mmp; } },
             { hp: 80, mhp: 80, mp: 10, mmp: 10, isDead() { return this.hp === 0; }, gainHp(n) { this.hp += n; }, setHp(n) { this.hp = n; }, setMp(n) { this.mp = n; }, recoverAll() { this.hp = this.mhp; this.mp = this.mmp; } }
@@ -287,6 +288,36 @@ console.log('\nPalSupport — quiz outcome');
     eq('passed quiz does not end the battle itself', W.BattleManager._result, null);
     W.BattleManager.endBattle(0);
     eq('passed quiz is never healed over by the defeat hook', W.party._m[0].hp, 100);
+
+    // A member knocked out during the quiz gets back up at 1 HP when the quiz is
+    // won: outside the tutorial no map heals and no shop sells a revive item, so
+    // leaving them dead would strand that member for the rest of the game.
+    const A = makeRuntime(PARAMS);
+    A.BattleManager.setup(4, false, true);
+    A.vars[6] = 4;
+    A.vars[7] = 3;
+    A.party._m[0].hp = 40;
+    A.party._m[1].hp = 0;                         // knocked out during the quiz
+    A.interpreter.cmd('PalSupport', 'quizdone', '7', '4');
+    eq('a member knocked out during a won quiz is revived to 1 HP', A.party._m[1].hp, 1);
+    eq('the survivor keeps its HP instead of being healed', A.party._m[0].hp, 40);
+
+    // Wiped out mid-quiz: a passing score cannot save a dead party.
+    const X = makeRuntime(PARAMS);
+    X.BattleManager.setup(4, false, true);
+    X.vars[6] = 5;
+    X.vars[7] = 2;
+    X.party._m[0].hp = 0;
+    X.party._m[1].hp = 0;
+    X.interpreter.cmd('PalSupport', 'quizdone', '7', '4');
+    check('a wiped party never wins, even with enough right answers',
+        !X.troop.isAllDead(), X.troop.members()[0].hp);
+    eq('the wiped party is still dead for the defeat path', X.party._m[0].hp, 0);
+    X.BattleManager.endBattle(2);
+    X.BattleManager.updateBattleEnd();
+    eq('the wiped party comes back at 1 HP, not 0', X.party._m[0].hp, 1);
+    eq('every wiped member comes back at 1 HP', X.party._m[1].hp, 1);
+    check('the wipe does not reach the game over screen', X.BattleManager.gameover === false);
 
     // Failed: fewer right answers than the threshold.
     const L = makeRuntime(PARAMS);

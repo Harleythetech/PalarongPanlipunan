@@ -83,7 +83,8 @@
  *       engine ends the battle through the normal victory path; failing knocks
  *       the party out so the engine runs its normal defeat path, then restores
  *       the HP the party had earned. The damage from wrong answers is therefore
- *       permanent, like a normal battle.
+ *       permanent, like a normal battle. A wiped party loses even if the score
+ *       passes, and a member knocked out during a won quiz gets up at 1 HP.
  *
  *   PalSupport hint
  *       Charges one hint to the player. Injected automatically by PalQuiz at
@@ -327,7 +328,16 @@
         refreshState();
         updateAccuracy();
 
-        if (correct >= need) {
+        // A wiped party cannot win, however many right answers came after it
+        // happened. Damage carries over between battles now, so it is possible
+        // to walk into a quiz at low HP and be knocked out mid-round. The quiz
+        // still runs to the end (MV does not check the party while a troop
+        // event is running), so this is the point where the loss is decided.
+        var wiped = false;
+        try { wiped = !!($gameParty && $gameParty.isAllDead && $gameParty.isAllDead()); }
+        catch (e) { wiped = false; }
+
+        if (correct >= need && !wiped) {
             // Enough right answers: finish the enemy so the engine runs its own
             // victory path (the same route the old 100-damage finisher used).
             // This happens here, not on the individual answer, because MV ends
@@ -340,6 +350,16 @@
                     });
                 }
             } catch (e) { log('victory finisher failed', e); }
+
+            // Anyone knocked out during the quiz gets back up at 1 HP. A normal
+            // victory would leave them dead on the map, and outside the tutorial
+            // no map heals and no shop sells a revive item, so a dead member
+            // would be stranded for good. The 1 HP is the consequence.
+            try {
+                $gameParty.members().forEach(function (m) {
+                    if (m && m.isDead() && m.setHp) m.setHp(1);
+                });
+            } catch (e) { log('victory revive failed', e); }
 
             pop('PANALO!', '#FFD700');
             log('quiz done', correct + '/' + total, 'victory (needed ' + need + ')');
@@ -373,8 +393,9 @@
             });
         } catch (e) { log('defeat push failed', e); }
 
-        pop('KULANG PA', '#FF8A8A');
-        log('quiz done', correct + '/' + total, 'defeat (needed ' + need + ')');
+        pop(wiped ? 'BUMIGAY!' : 'KULANG PA', '#FF8A8A');
+        log('quiz done', correct + '/' + total,
+            wiped ? 'defeat (party was wiped out)' : 'defeat (needed ' + need + ')');
     }
 
     // -------------------------------------------------------------------------
