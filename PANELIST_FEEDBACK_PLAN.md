@@ -128,13 +128,15 @@ How it behaves:
   bahay ay halimbawa ng kulturang materyal."* versus *"Mali! Ang puno ay bahagi
   ng kalikasan…"* — which is the feedback pattern comment #4 asks for, in a
   non-quiz format.
-- **It is part of the quest.** Completing it clears the "talk to Mang Isko" beat
-  and moves the arrow on to the next four villagers. Be aware that nothing in the
-  data *enforces* it: the Shadow battle (`Map034` ev29) is an unconditional
-  touch-trigger, and no other event reads the mini-game's switches or counter, so
-  a player can walk past the game and fight the boss anyway. It is on the
-  intended path, not a hard gate — gating the boss on it would be the honest fix
-  (§10).
+- **It is part of the quest, and it is now enforced.** Completing it clears the
+  "talk to Mang Isko" beat and moves the arrow on to the next four villagers.
+  The Shadow battle (`Map034` ev29) is now **gated on the mini-game**: its battle
+  page only exists while `Material_Count` (V2) is at least 3, which only the
+  mini-game can produce. Step on the tile before finishing and the party says so
+  and the arrow points back to Mang Isko.
+- **It pays candy.** Completing the three picks grants **candy x2** (+20 Candy
+  Points), announced with *"Nakuha mo ang gantimpala: candy x2."*, so the beat
+  feeds the same economy as the quiz victories instead of paying nothing.
 
 **A real bug was found here and fixed.** The sixth option was labelled
 `Bulaklak` (flower) while its feedback still read *"Tama! Ang Damit na suot
@@ -145,14 +147,23 @@ correctly was told they were right about *clothing* they never picked. The label
 is back to **Damit**, which now agrees with its feedback text, its switch name
 and the lesson.
 
+**How the gate avoids breaking anything.** The gate reads a *variable* that the
+mini-game itself fills in, not a new switch set inside page 1 of the conversation:
+
+| State | V2 | Self switch A | Page that runs |
+|---|---:|---|---|
+| New game, mini-game not done | 0 | off | 1 — "go back to Mang Isko" |
+| Mini-game done | 3+ | off | 2 — the battle |
+| Boss already beaten | 3+ | **on** | 3 — blank |
+
+This matters because a new switch would have **soft-locked existing saves**: a
+player who already finished the mini-game sits on the event's later page, so page
+1 never runs again and the switch would never be set. Reading V2 means any save
+that already completed the mini-game satisfies the gate automatically, and any
+save that already beat Shadow still lands on the blank page.
+
 **Could be improved (post-deadline, not started):**
 
-- **It is not enforced.** You can walk past Mang Isko and trigger the Shadow
-  battle anyway; nothing reads the mini-game's switches or counter. Gating
-  `Map034` ev29 on the mini-game's completion would make the interactivity
-  unskippable, which is what the panel comment is really asking for.
-- It grants no reward, so it does not feed the Candy Points economy the way the
-  quiz victories now do.
 - It is a pick-many list, not a spatial or timed game; the treasure hunt and the
   matching-pairs game in §10 would add variety.
 - The "Hindi pa rin po." retry branch replays the whole opening dialogue rather
@@ -451,6 +462,7 @@ node tools/simulate_support.js       # ALL CHECKS PASSED
 node tools/simulate_battle.js        # 7344 answer paths, 0 failures
 node tools/economy_check.js          # ECONOMY OK
 node tools/add_quiz_rewards.js --check   # map reward blocks still intact
+node tools/apply_minigame_gate.js --check # gate + mini-game reward still applied
 node tools/verify_minigame.js        # MINI-GAME OK
 ```
 
@@ -525,11 +537,13 @@ quiz battles (one fixed shuffle per battle, as in play):
 - the same run with the rewards removed dies on the last quiz — the rewards are
   load-bearing
 - a fully failed quiz still costs 48/100 HP, so the stakes remain real
-- the campaign hands out 16 candy (160 Candy Points), enough for rank 2 (`Gabay`)
-  and most of the way to rank 3
+- the campaign hands out 18 candy (180 Candy Points) — 16 from the six quiz
+  victories and 2 from the Mang Isko mini-game — enough for rank 2 (`Gabay`) and
+  over half of the way to rank 3 (`Sandigan`, 250)
 
-`add_quiz_rewards.js` is idempotent and refuses to edit a file whose events are
-not one-verbatim-JSON-per-line; re-running it finds nothing to do.
+`add_quiz_rewards.js` and `apply_minigame_gate.js` are idempotent and refuse to
+edit a file whose events are not one-verbatim-JSON-per-line; re-running either
+finds nothing to do.
 
 `verify_minigame.js` proves the Mang Isko selection game still teaches what it
 claims to teach:
@@ -545,9 +559,20 @@ claims to teach:
 - completion sets a self switch, so the game cannot be replayed for free
 - the four correct answers are exactly the man-made ones, and the switch names
   still agree with the option labels
+- **the Shadow battle is gated**: its one battle page carries a `Material_Count >=
+  3` condition, the page that runs before the mini-game contains no battle, the
+  page that runs after it does, and a boss that was already beaten still resolves
+  to the blank page — so the fight cannot be re-triggered
+- **the gate cannot soft-lock a save**: it reads a variable the mini-game itself
+  fills in, not a switch set inside page 1, so a save that finished the mini-game
+  before this change satisfies the gate without replaying it
+- **the reward is real and not farmable**: exactly one candy grant, inside the
+  completion branch (not on entry), announced by a Show Text, and the branch ends
+  by leaving the page
 
-Run against the pre-fix data it fails three independent ways, so it is a real
-gate rather than a formality.
+Run against the pre-fix data it fails three independent ways (the `Bulaklak`
+drift), and against the pre-gate data it fails twice more (`the battle is not
+gated on the mini-game counter`, `the mini-game grants no candy`).
 
 ---
 
@@ -607,7 +632,17 @@ These need the actual game window; the harness cannot render or read input.
     pick `Bahay`, `Tulay`, `Damit` → his follow-up question appears, then the
     `NavArrow` moves on and talking to him again gives only `Kamusta kayo bata?`.
     The fourth option must read **`Damit`**, never `Bulaklak`.
-17. Confirm `Troops.json` is still byte-identical: `git diff 21885e1 -- data/Troops.json`.
+17. On the third correct pick → **"Nakuha mo ang gantimpala: candy x2."**, and the
+    candy count on the map HUD goes up by 2. Re-talk to him → no second candy.
+18. **Before** finishing the mini-game, walk onto the Shadow tile (`Map034`
+    (36,15)) → the party says *"may itinuturo pa si Mang Isko na hindi natin
+    napakinggan"*, the arrow points back to him, and **no battle starts**.
+    After finishing the mini-game, the same tile starts the Shadow battle
+    normally. Win it, step on the tile again → nothing happens.
+19. Load a save that **already finished** the mini-game but has **not** beaten
+    Shadow → the tile must start the battle, not the "go back" line (this is the
+    soft-lock guard).
+20. Confirm `Troops.json` is still byte-identical: `git diff 21885e1 -- data/Troops.json`.
 
 Watch specifically for: the support card rendering on top of a sprite, and the
 `Kendi N` label width on the companion window in Filipino.
@@ -616,17 +651,16 @@ Watch specifically for: the support card rendering on top of a sprite, and the
 
 ## 10. Deferred (post-deadline)
 
-The build already has one mini-game (§3.1). Everything below is an **addition**,
-not a replacement, so the panel answer does not depend on any of it landing.
+The build already has one mini-game (§3.1), and it is now both gated into the
+quest and rewarded. Everything below is an **addition**, not a replacement, so
+the panel answer does not depend on any of it landing.
 
 | Feature | Notes |
 |---|---|
-| **Mang Isko reward** | It currently grants nothing. One `candy` grant in its completion branch would make it pay into the Candy Points economy like the quiz victories do. |
-| **Gate the boss on the mini-game** | `Map034` ev29 (the Shadow battle) is an unconditional touch-trigger, so the selection game can be walked past. Adding a condition or a blocking event would make the interactivity mandatory. |
 | **Treasure hunt** | 5 clue NPCs on an existing map; reuses `MissionTracker` `CM` + `NavArrow`; each clue behind a self-switch so it cannot be farmed. Event-only, zero engine risk. |
 | **Matching mini-game** | 8 pairs / 60 s, `Scene_PalMatch`; +2 per pair, +20 perfect. |
 | **Ordering puzzle** | Arrange a timeline; third priority. |
-| **Candy shop** | Extra hint 10 / heal 20 / revive 50 / cosmetic 100; needs `Scene_PalCandyShop` (the default shop only takes gold). The candy economy is already in place: the campaign awards 16 candy (160 points) across the six quizzes, enough for rank 2 and most of rank 3, so a shop would have something to spend. |
+| **Candy shop** | Extra hint 10 / heal 20 / revive 50 / cosmetic 100; needs `Scene_PalCandyShop` (the default shop only takes gold). The candy economy is already in place: the campaign awards 18 candy (180 points) — 16 from the six quizzes and 2 from the Mang Isko mini-game — enough for rank 2 and over half of rank 3, so a shop would have something to spend. |
 | **Question pools** | Each topic needs 15–20 questions with explanations before shuffling feels varied long-term. Tonight the 33 existing questions simply change order, which already satisfies the comment. |
 | **Fanatio hint option** | Troop 2 has no "Humingi ng Pahiwatig" choice at all (all other battles do). Adding one is a content edit to `Troops.json`, deliberately out of scope for a night where that file must not change. |
 | **Stimulant source** | `Stimulant` (item 4, revive, 300 G) is sold nowhere and granted nowhere. A knock-out is currently recovered by the 1 HP revival on a won quiz (§4.4), so this is not a blocker — but a revive item would be the natural next reward if the demos get harder. |
@@ -646,4 +680,6 @@ not a replacement, so the panel answer does not depend on any of it landing.
       provably winnable on the worst passing path (`economy_check.js`)
 - [x] Existing selection mini-game audited, its label/feedback bug fixed, and
       guarded by `verify_minigame.js` — it answers comments #2 and #3
+- [x] The mini-game is enforced (Shadow battle gated on it) and pays candy, with
+      no soft-lock for existing saves
 - [ ] In-engine playtest (§9) — **before the panel**

@@ -296,12 +296,239 @@ for (const g of games) {
     }
 }
 
+//-----------------------------------------------------------------------------
+// The gate: the quiz boss must not be reachable without playing the mini-game
+//-----------------------------------------------------------------------------
+// Without this, the interactivity is decoration the player can walk past. The
+// risk in the other direction is worse: a gate that an already-progressed save
+// cannot satisfy would soft-lock the quest forever. Both are checked here.
+{
+    const items = read('Items.json');
+    const candyId = items.findIndex(it => it && /<CandyPoint:/i.test(String(it.note || '')));
+
+    const REWARD_ITEM = candyId;
+    const BATTLE_CMD = 301;
+
+    // MV's Game_Event.findProperPageIndex scans BACKWARDS and returns the first
+    // page whose conditions hold, so the highest matching page wins.
+    const pageMatches = (pg, st) => {
+        const c = pg.conditions;
+        if (c.switch1Valid && !st.switches[c.switch1Id]) return false;
+        if (c.switch2Valid && !st.switches[c.switch2Id]) return false;
+        if (c.variableValid && (st.vars[c.variableId] || 0) < c.variableValue) return false;
+        if (c.selfSwitchValid && !st.self[c.selfSwitchCh]) return false;
+        if (c.itemValid && !st.items[c.itemId]) return false;
+        if (c.actorValid) return false;
+        return true;
+    };
+    const resolvePage = (pages, st) => {
+        for (let i = pages.length - 1; i >= 0; i--) {
+            if (pageMatches(pages[i], st)) return i;
+        }
+        return -1;
+    };
+    const hasBattle = pg => (pg.list || []).some(c => c.code === BATTLE_CMD);
+
+    for (const g of games) {
+        const map = read(g.file);
+        const tag = 'Map' + String(g.mapId).padStart(3, '0');
+
+        // The boss is the event in the same map that actually starts a battle.
+        const bosses = (map.events || []).filter(e =>
+            e && (e.pages || []).some(hasBattle));
+
+        if (!bosses.length) {
+            fail(tag + ': the mini-game gated nothing — no battle event was found in the map');
+            continue;
+        }
+
+        // The counter the mini-game increments, and how far it can go.
+        const counters = new Set();
+        let maxPicks = 0;
+        g.branches.forEach(b => {
+            if (!b.correct) return;
+            maxPicks++;
+            b.body.forEach(c => {
+                if (c.code === GAIN_SCORE && c.parameters[2] === 1 && c.parameters[4] > 0) {
+                    for (let v = c.parameters[0]; v <= c.parameters[1]; v++) counters.add(v);
+                }
+            });
+        });
+
+        for (const boss of bosses) {
+            const pages = boss.pages;
+            const battlePages = pages.filter(hasBattle);
+            if (battlePages.length !== 1) {
+                fail(tag + ' ev' + boss.id + ': expected exactly one battle page, found ' + battlePages.length);
+                continue;
+            }
+            const bp = battlePages[0];
+            const bc = bp.conditions;
+
+            // 1. The battle page must be gated on the mini-game's own counter.
+            if (!bc.variableValid || !counters.has(bc.variableId)) {
+                fail(tag + ' ev' + boss.id + ': the battle is not gated on the mini-game counter — ' +
+                    'the player can walk past the mini-game');
+                continue;
+            }
+            const need = bc.variableValue;
+
+            // 2. The gate must be satisfiable.
+            if (need > maxPicks) {
+                fail(tag + ' ev' + boss.id + ': the battle needs ' + need +
+                    ' but only ' + maxPicks + ' correct picks exist — unreachable');
+                continue;
+            }
+
+            // 3. Soft-lock check. The gate reads a variable, not a one-shot flag,
+            //    and that variable is the one the mini-game itself fills in. A
+            //    save that already finished the mini-game therefore satisfies it
+            //    without replaying. A switch set only inside page 1 would not.
+            const setByMiniGame = g.list.some(c => c.code === GAIN_SCORE &&
+                c.parameters[2] === 1 && c.parameters[4] > 0 &&
+                c.parameters[0] <= bc.variableId && c.parameters[1] >= bc.variableId);
+            if (!setByMiniGame) {
+                fail(tag + ' ev' + boss.id + ': the gate variable is not filled in by the mini-game, ' +
+                    'so an existing save could be permanently blocked');
+            } else {
+                ok(tag + ' ev' + boss.id + ': battle gated on V' + bc.variableId + ' >= ' + need +
+                    ', which the mini-game fills in (old saves keep working)');
+            }
+
+            // 4. The four states that must behave.
+            const base = { switches: {}, vars: {}, self: {}, items: {} };
+            const stateDone = { switches: {}, vars: {}, self: {}, items: {} };
+            stateDone.vars[bc.variableId] = need;
+
+            const pNone = resolvePage(pages, base);
+            const pDone = resolvePage(pages, stateDone);
+            const pBeaten = resolvePage(pages, Object.assign({}, stateDone, {
+                self: Object.assign({}, stateDone.self, { A: true })
+            }));
+
+            if (pNone >= 0 && hasBattle(pages[pNone])) {
+                fail(tag + ' ev' + boss.id + ': the battle still runs before the mini-game is done');
+            } else if (pNone < 0) {
+                fail(tag + ' ev' + boss.id + ': no page matches the "not started" state, so the ' +
+                    'player walks over the tile with no explanation');
+            } else {
+                ok(tag + ' ev' + boss.id + ': before the mini-game the tile explains why (page ' + (pNone + 1) + ')');
+            }
+
+            if (pDone < 0 || !hasBattle(pages[pDone])) {
+                fail(tag + ' ev' + boss.id + ': finishing the mini-game does not unlock the battle');
+            } else {
+                ok(tag + ' ev' + boss.id + ': after the mini-game the battle unlocks (page ' + (pDone + 1) + ')');
+            }
+
+            // Once won, the fight must not come back. The winning page sets self
+            // switch A, and a page conditioned on it must outrank the battle.
+            const blankHigher = pages.some((pg, i) =>
+                i > pages.indexOf(bp) && pg.conditions.selfSwitchValid &&
+                pg.conditions.selfSwitchCh === 'A');
+            const winsSetsA = (bp.list || []).some(c => c.code === SET_SELF &&
+                c.parameters[0] === 'A' && c.parameters[1] === 0);
+            if (!winsSetsA) {
+                fail(tag + ' ev' + boss.id + ': the battle never sets self switch A on, so it can be refought');
+            }
+            if (!blankHigher) {
+                fail(tag + ' ev' + boss.id + ': the "already beaten" page does not outrank the battle, ' +
+                    'so the fight could repeat');
+            } else if (pBeaten >= 0 && hasBattle(pages[pBeaten])) {
+                fail(tag + ' ev' + boss.id + ': a beaten boss can be fought again');
+            } else {
+                ok(tag + ' ev' + boss.id + ': a beaten boss stays beaten');
+            }
+        }
+    }
+
+    //----------------------------------------------------------------------
+    // The reward: the mini-game must pay into the Candy Points economy
+    //----------------------------------------------------------------------
+    const g = games.find(x => x.ev.name.trim() === 'Mang Isko');
+    if (!g) {
+        fail('cannot check the mini-game reward: the Mang Isko event is missing');
+    } else if (REWARD_ITEM < 0) {
+        fail('no item carries a <CandyPoint:N> note, so no reward could be paid in candy');
+    } else {
+        const tag = 'Map' + String(g.mapId).padStart(3, '0');
+        const list = g.list;
+
+        // Exactly one grant, anywhere in the event.
+        const grants = [];
+        list.forEach((c, i) => {
+            if (c.code === 126 && c.parameters[0] === REWARD_ITEM) grants.push(i);
+        });
+
+        if (grants.length === 0) {
+            fail(tag + ' ev' + g.ev.id + ': the mini-game grants no candy');
+        } else if (grants.length > 1) {
+            fail(tag + ' ev' + g.ev.id + ': the mini-game grants candy ' + grants.length +
+                ' times, which is ambiguous');
+        } else {
+            const at = grants[0];
+            const amount = list[at].parameters[3];
+
+            // It must sit inside the completion branch, not on entry: otherwise a
+            // player could collect it and leave.
+            const ifAt = list.findIndex(c => c.code === IF &&
+                c.parameters[0] === 1 &&
+                c.parameters[1] === g.branches.find(b => b.correct).body
+                    .map(x => x.code === GAIN_SCORE ? x.parameters[0] : null)
+                    .filter(x => x !== null)[0] &&
+                c.parameters[4] === 1);
+
+            const inBranch = ifAt >= 0 && at > ifAt && at < (() => {
+                for (let i = ifAt + 1; i < list.length; i++) {
+                    if (list[i].code === 411 || list[i].code === 412) return i;
+                }
+                return list.length;
+            })();
+
+            if (!inBranch) {
+                fail(tag + ' ev' + g.ev.id + ': the candy is granted outside the "mini-game complete" branch, ' +
+                    'so it could be collected without finishing');
+            } else if (!(amount > 0)) {
+                fail(tag + ' ev' + g.ev.id + ': the candy grant is a no-op (amount ' + amount + ')');
+            } else {
+                // Announced, because a silent grant on the map is easy to miss.
+                const after = list.slice(at + 1, at + 6);
+                const announced = after.some(c => c.code === 101) &&
+                                  after.some(c => c.code === TEXT);
+                if (!announced) {
+                    fail(tag + ' ev' + g.ev.id + ': the candy is granted silently; add a Show Text so the ' +
+                        'player learns they earned something');
+                } else {
+                    ok(tag + ' ev' + g.ev.id + ': candy x' + amount +
+                        ' granted once, inside the completion branch, and announced');
+                }
+            }
+
+            // The completion branch must end by leaving page 1, or the reward
+            // could be collected again.
+            const setsSelf = (() => {
+                for (let i = at; i < list.length; i++) {
+                    const c = list[i];
+                    if (c.code === 412 && c.indent === 0) return false;
+                    if (c.code === SET_SELF && c.parameters[1] === 0) return true;
+                }
+                return false;
+            })();
+            if (!setsSelf) {
+                fail(tag + ' ev' + g.ev.id + ': the reward branch does not leave the page, so it can be farmed');
+            } else {
+                ok(tag + ' ev' + g.ev.id + ': the reward branch ends by leaving the page (not farmable)');
+            }
+        }
+    }
+}
+
 console.log('');
 if (failures) {
     console.log(failures + ' failure(s)');
     process.exit(1);
 }
 console.log('MINI-GAME OK');
-console.log('note: this is an existing feature of the build, not something added for the');
-console.log('      panel — it already answers comments #2 (interactivity) and #3 (another');
-console.log('      way of answering).');
+console.log('note: the mini-game is an existing feature of the build, not something added');
+console.log('      for the panel — it already answers comments #2 (interactivity) and #3');
+console.log('      (another way of answering).');

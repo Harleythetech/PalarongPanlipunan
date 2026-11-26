@@ -314,9 +314,43 @@ if (last && stock > 0) {
 }
 
 // Candy is the other half of the reward: it has to be able to buy a rank.
+// Battle branches are already summed above. Anything else that grants candy —
+// the Mang Isko mini-game — is non-battle content, so count it separately and
+// add it, or this total would understate what the player can earn.
+let questCandy = 0;
+const questCandySources = [];
+for (const file of mapFiles) {
+    const map = read(file);
+    (map.events || []).forEach(ev => {
+        if (!ev) return;
+        // Skip battle events: their reward was counted by scanRewards.
+        const isBattleEvent = (ev.pages || []).some(pg => (pg.list || []).some(c => c.code === 301));
+        if (isBattleEvent) return;
+        (ev.pages || []).forEach(pg => {
+            (pg.list || []).forEach(c => {
+                if (c.code === GAIN_ITEM && c.parameters[0] === CANDY && c.parameters[3] > 0) {
+                    questCandy += c.parameters[3];
+                    questCandySources.push(file + ' ev' + ev.id + ' "' + String(ev.name).trim() + '"');
+                }
+            });
+        });
+    });
+}
+
 {
-    const points = totalCandy * 10;
-    ok('candy handed out by the campaign: ' + totalCandy + ' (' + points + ' Candy Points)');
+    const total = totalCandy + questCandy;
+    const points = total * 10;
+    ok('candy handed out by the campaign: ' + total + ' (' + points + ' Candy Points)  [' +
+        totalCandy + ' from battles + ' + questCandy + ' from quests]');
+    if (questCandy > 0) {
+        ok('  non-battle candy comes from: ' + [...new Set(questCandySources)].join(', '));
+    }
+    if (points < 100) {
+        fail('the campaign awards only ' + points + ' points, short of the 100 needed for rank 2');
+    } else {
+        ok('that is enough for rank 2 (Gabay, 100 points) and ' +
+            Math.min(100, Math.round((points - 100) / 150 * 100)) + '% of the way to rank 3 (Sandigan, 250)');
+    }
 }
 
 // ---------------------------------------------------------------------------
