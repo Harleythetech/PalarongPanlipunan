@@ -251,6 +251,29 @@ Rewritten in the runtime copy only:
 This is strictly better than before: no invisible-command-window state, no
 stranded dead member, no early end to the quiz, and losing a quiz now costs HP.
 
+### 4.4a Health is the stake, and it is visible
+
+This is a quiz **with health**, not a quiz scored by health: an answer is always
+judged honestly, and health is what the answer costs. The team's earlier idea of
+letting low health make a correct answer count as wrong was dropped — it turns a
+knowledge check into a coin flip and creates a death spiral (low HP → judged
+wrong → more damage → lower HP).
+
+- A wrong answer costs HP **as it happens**, through the troop page's own
+  `Change HP` command, so the party bars drop during the quiz.
+- The HP cost is announced with a floating `-10 HP` next to the answer, measured
+  as the difference between the last two answers. Nothing is hard-coded, so if a
+  branch is ever re-authored the number follows the data. The Arkin gauge is
+  reported separately (`Arkin -15`) so it is not mistaken for health.
+- A branch that heals instead of hurting is reported as `+N HP`.
+- Health carries between battles, and the map HUD already shows both members'
+  bars, so the cost of a lost quiz is visible before the next one.
+- **Potions are the recovery.** `Potion` (item 1, `+500 HP`, 50 G) already exists
+  and is fully usable from the menu; item effects never pass through the damage
+  bookkeeping, so a potion always heals for real. Nothing in the project grants
+  one yet and there is no shop, so until the planned potion source lands the
+  tutorial's branches are the only heal. That is a content gap, not a code one.
+
 ### 4.5 Map HUD
 
 `Window_MapCompanionHUD` now shows `Kendi <points>` on the name row and
@@ -341,6 +364,12 @@ node tools/simulate_battle.js        # 7344 answer paths, 0 failures
   (inn, save point) all still heal fully, even one second later
 - a member knocked out mid-quiz comes back at 1 HP, never 0 (no game over loop)
 - a stale defeat flag never leaks into the next battle
+- each answer announces the HP it actually cost (`-10 HP`), separately from the
+  Arkin gauge (`Arkin -15`); a correct answer announces no HP change; a branch
+  heal is announced as `+N HP`
+- a potion heals normally after a quiz, is never rolled back, and the healed HP
+  becomes the baseline for the next battle
+- a heal after the battle event has finished is a real heal, never capped
 - candy adds 10 points each
 - kill switch suppresses everything
 - `BattleManager.setup` rewrites the page **in memory only**; `Troops.json`
@@ -392,21 +421,25 @@ These need the actual game window; the harness cannot render or read input.
    positions; `Item3` + green flash + `+10` pop on a correct answer.
 2. Each of the six bosses: completes, card shows `Kendi`, support gauge, tally.
 3. Replay a boss three times → three different orders; no repeats inside one run.
-4. Answer everything wrong → `KULANG PA`, the defeat message, Arkin's "magbasa
+4. A wrong answer shows **both** `-10 HP` and `Arkin -15`, and the party bars
+   drop by the `-10` · the two must not be confused with each other.
+5. Answer everything wrong → `KULANG PA`, the defeat message, Arkin's "magbasa
    muna tayo" line, and the party on the map **missing the HP the wrong answers
    cost** (not healed to full by the branch's `Recover All`). Each wrong answer
    should take a small, equal slice of HP — never knock anyone out in one hit at
    full health.
-5. Win the tutorial with one or two wrong answers → `PANALO!`, and the party
+6. Win the tutorial with one or two wrong answers → `PANALO!`, and the party
    leaves at 100 minus the damage those wrong answers cost.
-5. Lose seven answers' worth of support → card reads `WALA`, the hint option
+7. Use a `Potion` from the menu after a quiz → HP recovers for real, and the next
+   battle starts from the healed value (not from the pre-potion HP).
+8. Lose seven answers' worth of support → card reads `WALA`, the hint option
    refuses ("Naubos na ang aking mga tala").
-6. Reach 100 points → rank badge flips to `GABAY`.
-7. Save mid-chapter, reload → points, rank, support, hints intact.
-8. Load an **old** save (`save/file1.rpgsave`) → no crash, support initialises
-   to full on the next battle.
-9. Mobile scale 1.4: card and map counter do not overlap other HUD elements.
-10. Confirm `Troops.json` is still byte-identical: `git diff 21885e1 -- data/Troops.json`.
+9. Reach 100 points → rank badge flips to `GABAY`.
+10. Save mid-chapter, reload → points, rank, support, hints intact.
+11. Load an **old** save (`save/file1.rpgsave`) → no crash, support initialises
+    to full on the next battle.
+12. Mobile scale 1.4: card and map counter do not overlap other HUD elements.
+13. Confirm `Troops.json` is still byte-identical: `git diff 21885e1 -- data/Troops.json`.
 
 Watch specifically for: the support card rendering on top of a sprite, and the
 `Kendi N` label width on the companion window in Filipino.
@@ -423,7 +456,7 @@ Watch specifically for: the support card rendering on top of a sprite, and the
 | **Candy shop** | Extra hint 10 / heal 20 / revive 50 / cosmetic 100; needs `Scene_PalCandyShop` (the default shop only takes gold). |
 | **Question pools** | Each topic needs 15–20 questions with explanations before shuffling feels varied long-term. Tonight the 33 existing questions simply change order, which already satisfies the comment. |
 | **Fanatio hint option** | Troop 2 has no "Humingi ng Pahiwatig" choice at all (all other battles do). Adding one is a content edit to `Troops.json`, deliberately out of scope for a night where that file must not change. |
-| **Balance** | One correct answer kills a 100-HP enemy, so the quiz is all-or-nothing. Tuning (more enemy HP, or less damage per correct answer) needs playtesting with students; not a 4 a.m. change. |
+| **Potion source** | `Potion` (item 1) exists, heals `+500` and is fully compatible with the new damage bookkeeping, but nothing grants it and the project has no shop. The planned potion drop/shop is the intended answer to the health attrition across the six quiz battles. |
 
 ---
 

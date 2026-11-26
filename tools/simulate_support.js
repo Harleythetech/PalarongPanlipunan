@@ -167,10 +167,15 @@ function makeRuntime(pluginParams) {
     // Mirrors command301 (Battle Processing): it is what starts the battle, and
     // the plugin remembers the interpreter so only its own branch heal is capped.
     sandbox.Game_Interpreter.prototype.command301 = function (troopId, canLose) {
+        this._running = true;
         BattleManager.setup(troopId || 1, false, canLose !== false);
         return true;
     };
-
+    // Mirrors Game_Interpreter.isRunning(): an event page that has finished is
+    // no longer running, so its aftermath cannot cap a later heal.
+    sandbox.Game_Interpreter.prototype.isRunning = function () {
+        return this._running !== false;
+    };
     const context = vm.createContext(sandbox);
     vm.runInContext(read('js/plugins/PalSupport.js'), context, { filename: 'PalSupport.js' });
     vm.runInContext(read('js/plugins/PalQuiz.js'), context, { filename: 'PalQuiz.js' });
@@ -201,7 +206,11 @@ function makeRuntime(pluginParams) {
         recoverAll(params) {
             this._params = params || [0, 0];
             return sandbox.Game_Interpreter.prototype.command314.call(this);
-        }
+        },
+        // The event page has finished running.
+        finish() { this._running = false; },
+        // Mirrors Game_Interpreter.isRunning() on the instance the plugin sees.
+        isRunning() { return this._running !== false; }
     };
 
     return { sandbox, vars, sws, party, troop, interpreter, BattleManager, soundLog, flashLog, stubLayer, troopCleared: () => troopInterpreterCleared };
@@ -252,6 +261,46 @@ console.log('PalSupport — answer pipeline');
 
     eq('story Conversation_Count untouched', R2.vars[1] || 0, 0);
     eq('story Material_Count untouched', R2.vars[2] || 0, 0);
+}
+
+console.log('\nPalSupport — the health cost of an answer is shown');
+{
+    // The troop page's own Change HP command runs before the score command, so
+    // the plugin reports the difference between answers.
+    const R = makeRuntime(PARAMS);
+    R.interpreter.startBattle(1);
+
+    R.party._m[0].hp = 90;                        // the branch's Change HP hit
+    R.party._m[1].hp = 70;
+    R.interpreter.cmd('PalBattleHUD', 'enemyscore', 'add', '1');
+    const pops = R.stubLayer.pushes.map(p => p[0]);
+    check('a wrong answer reports the HP it cost', pops.includes('-10 HP'), pops);
+    check('the Arkin gauge is reported separately, not as HP',
+        pops.some(t => /^Arkin -/.test(t)), pops);
+
+    // Two wrong answers in a row each report their own cost.
+    R.stubLayer.pushes.length = 0;
+    R.party._m[0].hp = 80;
+    R.party._m[1].hp = 60;
+    R.interpreter.cmd('PalBattleHUD', 'enemyscore', 'add', '1');
+    const pops2 = R.stubLayer.pushes.map(p => p[0]);
+    eq('the second wrong answer reports only its own cost',
+        pops2.filter(t => t === '-10 HP').length, 1);
+
+    // A correct answer costs nothing, so it reports nothing for HP.
+    R.stubLayer.pushes.length = 0;
+    R.interpreter.cmd('PalBattleHUD', 'score', 'add', '1');
+    const pops3 = R.stubLayer.pushes.map(p => p[0]);
+    check('a correct answer reports no HP loss', !pops3.some(t => /^-?\d+ HP$/.test(t)), pops3);
+
+    // A heal inside a branch is reported as a gain, not hidden.
+    R.stubLayer.pushes.length = 0;
+    R.party._m[0].hp = 100;                        // 80 -> 100
+    R.party._m[1].hp = 100;                        // 60 -> 100
+    R.interpreter.cmd('PalBattleHUD', 'enemyscore', 'add', '1');
+    const pops4 = R.stubLayer.pushes.map(p => p[0]);
+    check('a branch heal is reported as a gain, never as a loss',
+        pops4.includes('+40 HP') && !pops4.some(t => /^-\d+ HP$/.test(t)), pops4);
 }
 
 console.log('\nPalSupport — rank unlock at 100 points');
@@ -563,6 +612,64 @@ console.log('\nPalSupport — the quiz damage survives the map\'s own heal');
     const inn = { _params: [0, 0] };
     E.sandbox.Game_Interpreter.prototype.command314.call(inn);
     eq('a heal from another event is never capped', E.party._m[0].hp, 100);
+
+    // The event that fought the battle has finished; a Recover All on it later
+    // is a real heal, not the battle's aftermath.
+    const G = makeRuntime(PARAMS);
+    G.interpreter.startBattle(1);
+    G.vars[6] = 2;
+    G.vars[7] = 1;
+    G.party._m[0].hp = 50;
+    G.interpreter.cmd('PalSupport', 'quizdone', '3', '2');
+    G.BattleManager.endBattle(0);
+    G.BattleManager.updateBattleEnd();
+    G.interpreter.finish();
+    G.interpreter.recoverAll();
+    eq('a heal after the battle event ended is a real heal', G.party._m[0].hp, 100);
+
+    // Potions are the recovery the design calls for. Nothing in the damage
+    // bookkeeping may block or undo an item heal.
+    //
+    // Real order: battle ends, the branch's Recover All runs (capped), control
+    // returns to the map, and only then can the player open the menu.
+    const P2 = makeRuntime(PARAMS);
+    P2.interpreter.startBattle(1);
+    P2.vars[6] = 2;
+    P2.vars[7] = 1;
+    P2.party._m[0].hp = 50;
+    P2.party._m[1].hp = 40;
+    P2.interpreter.cmd('PalSupport', 'quizdone', '3', '2');
+    P2.BattleManager.endBattle(0);
+    P2.BattleManager.updateBattleEnd();
+    P2.interpreter.recoverAll();                   // the branch's own heal
+    eq('the branch heal already ran and kept the damage', P2.party._m[0].hp, 50);
+    P2.party._m[0].gainHp(50);                     // Potion: HP Recovery +500
+    P2.party._m[1].gainHp(60);
+    eq('a potion heals the member who kept the quiz damage', P2.party._m[0].hp, 100);
+    eq('a potion heals the second member too', P2.party._m[1].hp, 100);
+    P2.interpreter.recoverAll();
+    eq('a potion heal is never rolled back afterwards', P2.party._m[0].hp, 100);
+
+    // And a potion used between quizzes is the new baseline: the next battle
+    // must not treat the healed HP as damage.
+    const P3 = makeRuntime(PARAMS);
+    P3.interpreter.startBattle(1);
+    P3.vars[6] = 0;
+    P3.vars[7] = 3;
+    P3.party._m[0].hp = 70;
+    P3.interpreter.cmd('PalSupport', 'quizdone', '3', '2');
+    P3.BattleManager.endBattle(2);
+    P3.BattleManager.updateBattleEnd();
+    P3.party._m[0].gainHp(30);                     // potion on the map
+    eq('the potion takes effect before the next battle', P3.party._m[0].hp, 100);
+    P3.interpreter.startBattle(1);
+    P3.vars[6] = 2;
+    P3.vars[7] = 1;
+    P3.party._m[0].hp = 90;                        // one wrong answer this time
+    P3.interpreter.cmd('PalSupport', 'quizdone', '3', '2');
+    P3.BattleManager.endBattle(0);
+    P3.BattleManager.updateBattleEnd();
+    eq('the next battle keeps only its own damage', P3.party._m[0].hp, 90);
 }
 
 console.log('\nPalSupport — the tutorial Game Over command is neutralised');

@@ -96,6 +96,12 @@
  *   PalSupport support add|set <n>
  *   PalSupport candy <n>
  *
+ * HEALTH
+ *   A wrong answer costs HP through the troop page's own Change HP command, so
+ *   the party bars drop during the quiz and the cost is announced as "-N HP".
+ *   Answers are always judged honestly: health is the stake, not the scorer.
+ *   A Potion (item 1) heals normally and is never touched by this bookkeeping.
+ *
  * KILL SWITCH
  *   Switch 31 (PalSupport_Disabled) ON turns the whole plugin off.
  *   Switch 30 (QuizShuffle_Disabled) ON turns the PalQuiz shuffler off.
@@ -256,6 +262,41 @@
     }
 
     // -------------------------------------------------------------------------
+    // Health feedback
+    // -------------------------------------------------------------------------
+    //
+    // A quiz that runs on health only reads as one if the player can see what an
+    // answer cost. The troop page applies its own Change HP command and only
+    // then calls the score command, so the difference between this answer and the
+    // previous one is exactly that answer's damage. Nothing is hard-coded here:
+    // whatever the branch did to the bars is what gets reported.
+    var lastHpSnap = null;
+
+    function hpSnapshot() {
+        return partyList().map(function (m) { return m ? m.hp : 0; });
+    }
+
+    // Largest single drop since the last answer, because the authored command
+    // hits every member with the same value. Returns the amount lost.
+    function reportHpCost() {
+        var now = hpSnapshot();
+        if (!lastHpSnap) { lastHpSnap = now; return 0; }
+        var lost = 0, gained = 0;
+        for (var i = 0; i < now.length && i < lastHpSnap.length; i++) {
+            var d = (now[i] || 0) - (lastHpSnap[i] || 0);   // positive = healed
+            if (d < 0 && -d > lost) lost = -d;
+            if (d > 0 && d > gained) gained = d;
+        }
+        if (lost > 0) {
+            pop('-' + lost + ' HP', '#FF6B6B');
+        } else if (gained > 0) {
+            pop('+' + gained + ' HP', '#7CFC8A');
+        }
+        lastHpSnap = now;
+        return lost;
+    }
+
+    // -------------------------------------------------------------------------
     // Support / point pipelines
     // -------------------------------------------------------------------------
 
@@ -263,6 +304,10 @@
         addv(C.correctVar, 1);
         var streak = gv(C.streakVar) + 1;
         sv(C.streakVar, streak);
+
+        // A correct answer should never cost health, but report it if a troop
+        // page ever is authored that way.
+        reportHpCost();
 
         var gained = C.correctPoints;
         var bonus  = 0;
@@ -287,6 +332,9 @@
         addv(C.wrongVar, 1);
         sv(C.streakVar, 0);
 
+        // What the branch's own Change HP command just took off the party.
+        var hpLost = reportHpCost();
+
         var st = refreshState();
         var dmg = st.support > 0 ? Math.min(st.support, C.wrongSupport) : 0;
         sv(C.supportVar, clamp(st.support - C.wrongSupport, 0, st.maxHp));
@@ -295,8 +343,8 @@
 
         sound(false);
         flash(false);
-        pop('-' + C.wrongSupport, '#FF6B6B');
-        log('wrong', 'support damage', dmg, 'support', gv(C.supportVar));
+        pop('Arkin -' + C.wrongSupport, '#FFB86B');
+        log('wrong', 'hp', -hpLost, 'support damage', dmg, 'support', gv(C.supportVar));
     }
 
     function onHint() {
@@ -654,6 +702,7 @@
 
             // Baseline for the quiz damage: the HP the player walked in with.
             recordEnterHp();
+            lastHpSnap = hpSnapshot();
 
             // Per-battle counters
             sv(C.correctVar, 0);
@@ -826,6 +875,14 @@
         try {
             if (disabled() || !resultHp) return ok;
             if (this !== quizBattleInterpreter) return ok;
+
+            // Only the run that actually fought the battle can have its aftermath
+            // heal capped. Once that event has finished, the snapshot is stale and
+            // a later heal on this interpreter is a real heal.
+            if (quizBattleInterpreter.isRunning && !quizBattleInterpreter.isRunning()) {
+                clearResultHp();
+                return ok;
+            }
 
             // Only a party-wide Recover All is the authored post-battle heal.
             // A heal aimed at one actor is left completely alone.
