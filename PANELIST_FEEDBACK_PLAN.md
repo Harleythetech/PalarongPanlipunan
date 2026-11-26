@@ -275,11 +275,54 @@ wrong → more damage → lower HP).
 - A branch that heals instead of hurting is reported as `+N HP`.
 - Health carries between battles, and the map HUD already shows both members'
   bars, so the cost of a lost quiz is visible before the next one.
-- **Potions are the recovery.** `Potion` (item 1, `+500 HP`, 50 G) already exists
-  and is fully usable from the menu; item effects never pass through the damage
-  bookkeeping, so a potion always heals for real. Nothing in the project grants
-  one yet and there is no shop, so until the planned potion source lands the
-  tutorial's branches are the only heal. That is a content gap, not a code one.
+- **Potions are the recovery, and every victory grants one.** `Potion` (item 1,
+  `+500 HP`, 50 G) is usable from the menu; item effects never pass through the
+  damage bookkeeping, so a potion always heals for real (§4.6).
+
+### 4.6 Battle rewards — why the potion source had to be made visible
+
+Every quiz boss already dropped an item through the enemy drop table, but the
+player never saw it. `BattleHUD._suppressDefaultBattleUI` sets the battle log
+window's `opacity` **and** `contentsOpacity` to `0`, so MV's
+`Obtained Potion!` line is drawn into an invisible window. The items were being
+granted silently — which is why the project looked like it had no potion source
+at all.
+
+The fix is an announced reward in each battle's **`If Win` branch**, using the
+game's own message window (which is not suppressed):
+
+| Battle | Troop | Questions | Potion | Candy |
+|---|---|---:|---:|---:|
+| Tutorial (`Map002` ev4) | 1 | 3 | 1 | 1 |
+| Fanatio (`Map025` ev2 **and** ev3) | 2 | 3 | 1 | 2 |
+| Malviro (`Map035` ev4) | 3 | 7 | 1 | 2 |
+| Shadow (`Map034` ev29) | 4 | 6 | 1 | 2 |
+| Veyra (`Map047` ev5) | 5 | 7 | 1 | 2 |
+| Morrivelle (`Map043` ev15 **and** ev19) | 6 | 7 | 2 | 3 |
+
+- `Map025` and `Map043` each hold **two copies** of the same fight on adjacent
+  tiles, so both are edited — otherwise the payout would depend on which tile the
+  player stepped on. Neither pair can be fought twice (winning `Map043` one sets
+  switch 21, which turns both events into their empty second page).
+- Rewards are **inside `If Win` only**. Nothing is granted on a loss, so a retry
+  cannot be farmed for items.
+- The tutorial reward is anchored after its `Recover All`, so the player reads it
+  after the trainer's lines and just before the map change — and it is the moment
+  they learn that potions exist.
+- Purely additive: no existing command, item, or drop was removed, so the game
+  cannot become harder than it was.
+
+**Is the campaign still winnable?** `tools/economy_check.js` answers that from
+the real data rather than by hand: it reads the questions from `Troops.json`, the
+damage from `PalQuiz.damagePlan`, the drops from `Enemies.json`, and the rewards
+from the map events, then simulates the pessimistic-but-passing player (the most
+wrong answers that still passes each quiz, healing between battles only, always on
+the weaker member). That run finishes the last battle at **79/100 HP with 3
+potions spare**. Without any potions at all the same run dies on the last quiz —
+so the rewards are load-bearing, not decoration.
+
+`Stimulant` (item 4, revive) is still sold nowhere; a knock-out is handled by the
+1 HP revival on a won quiz (§4.4) rather than by an item.
 
 ### 4.5 Map HUD
 
@@ -343,6 +386,8 @@ Item 6 (`candy`): icon 87, Filipino description, non-consumable, `occasion: 3`
 node tools/verify_shuffle.js 500     # 3000 permutations, 0 failures
 node tools/simulate_support.js       # ALL CHECKS PASSED
 node tools/simulate_battle.js        # 7344 answer paths, 0 failures
+node tools/economy_check.js          # ECONOMY OK
+node tools/add_quiz_rewards.js --check   # map reward blocks still intact
 ```
 
 `verify_shuffle.js` proves, for every permutation of every troop:
@@ -402,6 +447,26 @@ quiz battles (one fixed shuffle per battle, as in play):
 | 3, 5, 6 | 7 | 14 | 7 | 4 | 98/100 | 49/100 |
 | 4 | 6 | 16 | 8 | 3 | 96/100 | 48/100 |
 
+`economy_check.js` proves, from the real data rather than a hand calculation:
+
+- every quiz battle that a map event starts has a reward in its `If Win` branch,
+  and that reward is **announced with a Show Text** (the battle log is hidden, so
+  an unannounced grant would be invisible)
+- no reward is granted in an `If Lose` branch, so a loss cannot be farmed
+- the two copies of the Fanatio and Morrivelle fights give **identical** rewards,
+  so the payout cannot depend on which tile the player stood on
+- the pessimistic passing run (most wrong answers that still passes, healing only
+  between battles, always on the weaker member) reaches the last battle alive at
+  **79/100 HP with 3 potions spare**
+- the same run with the rewards removed dies on the last quiz — the rewards are
+  load-bearing
+- a fully failed quiz still costs 48/100 HP, so the stakes remain real
+- the campaign hands out 16 candy (160 Candy Points), enough for rank 2 (`Gabay`)
+  and most of the way to rank 3
+
+`add_quiz_rewards.js` is idempotent and refuses to edit a file whose events are
+not one-verbatim-JSON-per-line; re-running it finds nothing to do.
+
 ---
 
 ## 8. Rollback
@@ -437,16 +502,25 @@ These need the actual game window; the harness cannot render or read input.
    full health.
 6. Win the tutorial with one or two wrong answers → `PANALO!`, and the party
    leaves at 100 minus the damage those wrong answers cost.
-7. Use a `Potion` from the menu after a quiz → HP recovers for real, and the next
-   battle starts from the healed value (not from the pre-potion HP).
-8. Lose seven answers' worth of support → card reads `WALA`, the hint option
-   refuses ("Naubos na ang aking mga tala").
-9. Reach 100 points → rank badge flips to `GABAY`.
-10. Save mid-chapter, reload → points, rank, support, hints intact.
-11. Load an **old** save (`save/file1.rpgsave`) → no crash, support initialises
+7. Win the tutorial → the trainer's lines, then **"Nakuha mo ang gantimpala:
+   Potion x1 at candy x1."** — this is the moment the player learns potions
+   exist, and it must appear because the battle log that would normally say
+   "Obtained Potion!" is hidden by `BattleHUD`.
+8. Use that `Potion` from the menu → HP recovers for real, and the next battle
+   starts from the healed value (not from the pre-potion HP).
+9. Win a boss → the equivalent reward line appears once, after the chapter prize.
+   **Fight `Fanatio` and `Morrivelle` from each of their two tiles in turn**: the
+   reward must be the same either way, and the fight must not be repeatable.
+10. Lose a boss on purpose → **no** reward line, and no item gained.
+11. Lose seven answers' worth of support → card reads `WALA`, the hint option
+    refuses ("Naubos na ang aking mga tala").
+12. Reach 100 points → rank badge flips to `GABAY`.
+13. Save mid-chapter, reload → points, rank, support, hints, potion and candy
+    counts intact.
+14. Load an **old** save (`save/file1.rpgsave`) → no crash, support initialises
     to full on the next battle.
-12. Mobile scale 1.4: card and map counter do not overlap other HUD elements.
-13. Confirm `Troops.json` is still byte-identical: `git diff 21885e1 -- data/Troops.json`.
+15. Mobile scale 1.4: card and map counter do not overlap other HUD elements.
+16. Confirm `Troops.json` is still byte-identical: `git diff 21885e1 -- data/Troops.json`.
 
 Watch specifically for: the support card rendering on top of a sprite, and the
 `Kendi N` label width on the companion window in Filipino.
@@ -460,10 +534,10 @@ Watch specifically for: the support card rendering on top of a sprite, and the
 | **Treasure hunt** | 5 clue NPCs on an existing map; reuses `MissionTracker` `CM` + `NavArrow`; each clue behind a self-switch so it cannot be farmed. Event-only, zero engine risk. |
 | **Matching mini-game** | 8 pairs / 60 s, `Scene_PalMatch`; +2 per pair, +20 perfect. |
 | **Ordering puzzle** | Arrange a timeline; third priority. |
-| **Candy shop** | Extra hint 10 / heal 20 / revive 50 / cosmetic 100; needs `Scene_PalCandyShop` (the default shop only takes gold). |
+| **Candy shop** | Extra hint 10 / heal 20 / revive 50 / cosmetic 100; needs `Scene_PalCandyShop` (the default shop only takes gold). The candy economy is already in place: the campaign awards 16 candy (160 points) across the six quizzes, enough for rank 2 and most of rank 3, so a shop would have something to spend. |
 | **Question pools** | Each topic needs 15–20 questions with explanations before shuffling feels varied long-term. Tonight the 33 existing questions simply change order, which already satisfies the comment. |
 | **Fanatio hint option** | Troop 2 has no "Humingi ng Pahiwatig" choice at all (all other battles do). Adding one is a content edit to `Troops.json`, deliberately out of scope for a night where that file must not change. |
-| **Potion source** | `Potion` (item 1) exists, heals `+500` and is fully compatible with the new damage bookkeeping, but nothing grants it and the project has no shop. The planned potion drop/shop is the intended answer to the health attrition across the six quiz battles. |
+| **Stimulant source** | `Stimulant` (item 4, revive, 300 G) is sold nowhere and granted nowhere. A knock-out is currently recovered by the 1 HP revival on a won quiz (§4.4), so this is not a blocker — but a revive item would be the natural next reward if the demos get harder. |
 
 ---
 
@@ -476,4 +550,6 @@ Watch specifically for: the support card rendering on top of a sprite, and the
 - [x] `Conversation_Count` / `Material_Count` survive battles
 - [x] Both kill switches restore pre-panel behaviour
 - [x] Old saves tolerated (append-only variables, `fresh` detection)
+- [x] Every quiz victory grants an announced Potion + candy; the campaign is
+      provably winnable on the worst passing path (`economy_check.js`)
 - [ ] In-engine playtest (§9) — **before the panel**
