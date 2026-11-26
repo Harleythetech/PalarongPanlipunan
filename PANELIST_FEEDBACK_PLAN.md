@@ -148,21 +148,30 @@ gauge, `Pahiwatig n/N`, `Kendi <points>`, and a `Tama / Mali / %` tally.
    `Jump to Label`.
 4. Shuffle answer options; the hint option stays last; each branch moves with
    its own choice text.
-5. Remove ordinal filler (`Ikalawang katanungan.`, `Huling tanong.`,
+5. Strip any `Game Over` (353) command from the runtime copy only.
+6. Remove ordinal filler (`Ikalawang katanungan.`, `Huling tanong.`,
    `Fanatio:" Para naman sa pangalawang tanong.`) so a moved block never lies
    about its position. Real questions that merely mention an ordinal are kept.
-6. Append `PalSupport quizdone <n>`.
-7. Validate again; any mismatch returns the original list untouched.
+7. Append `PalSupport quizdone <n>`.
+8. Validate again; any mismatch returns the original list untouched.
 
 ### 4.3 Battle outcome (the safe part)
 
 - **Pass** (enemy already dead from its own `−100 HP` command): nothing is
   changed. The engine's normal victory path runs the existing `If Win` branch.
 - **Fail** (enemy alive ⇒ no correct answers): the party is knocked out so the
-  engine runs its **normal defeat path**, which fires the existing `If Lose`
-  branch (Arkin: "magbasa muna tayo ng mga tala…"). The `endBattle` hook then
-  restores the party, because those `If Lose` branches never heal and the player
-  would otherwise walk the map with 0 HP.
+  engine runs its **normal defeat path** — defeat ME, defeat message, actor
+  collapse — which fires the existing `If Lose` branch (Arkin: "magbasa muna
+  tayo ng mga tala…"). The `endBattle` hook then restores the party, because the
+  engine only revives to 1 HP and those `If Lose` branches never heal.
+
+> **The `Game Over` trap.** `Troops.json` troop 1 has two `Game Over` event
+> commands (L125/L132) on the *final* question's wrong answers. They fire
+> **before** the injected `quizdone`, so answering the last question wrong
+> hard-reset the run to the title screen and the `If Lose` branch could never
+> run. PalQuiz strips command `353` from the **runtime copy only** (switch
+> `softenGameOver`, default on). `data/Troops.json` is still byte-identical to
+> `21885e1`.
 
 This is strictly better than before: no invisible-command-window state, no dead
 party on the map, and no change to the win condition.

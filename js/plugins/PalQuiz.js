@@ -22,6 +22,9 @@
  * @param neutralizeOrdinals
  * @default true
  *
+ * @param softenGameOver
+ * @default true
+ *
  * @param Debug Logging
  * @default false
  *
@@ -352,7 +355,9 @@ var PalQuizCore = (function () {
                 if (hc.code === 122 && hc.parameters[0] <= 15 && hc.parameters[1] >= 15) {
                     hintBranch.cmds.splice(z + 1, 0, {
                         code: 356, indent: hc.indent,
-                        parameters: ['PalSupport', 'hint']
+                        // MV's command356 does params[0].split(" "), so the whole
+                        // command has to live in a single string.
+                        parameters: ['PalSupport hint']
                     });
                     break;
                 }
@@ -439,12 +444,21 @@ var PalQuizCore = (function () {
 
         result = result.concat(parsed.suffix.map(clone));
 
+        // A wrong answer on the tutorial's last question ends its branch with a
+        // "Game Over" event command (Troops.json 1, two of them). That command
+        // fires BEFORE the injected quizdone, so it would hard-reset the run to
+        // the title screen and the map's own "If Lose" branch could never run.
+        // Drop it from the runtime copy only; the file on disk is untouched.
+        if (opts.softenGameOver !== false) {
+            result = result.filter(function (c) { return c.code !== 353; });
+        }
+
         // quizdone goes just before the terminating command.
         var insertAt = result.length;
         while (insertAt > 0 && result[insertAt - 1].code === 0) insertAt--;
         result.splice(insertAt, 0, {
             code: 356, indent: 0,
-            parameters: ['PalSupport', 'quizdone', String(total)]
+            parameters: ['PalSupport quizdone ' + total]
         });
 
         // ---- post-conditions --------------------------------------------------
@@ -495,6 +509,7 @@ var PalQuizCore = (function () {
         shuffleQuestions: bool('shuffleQuestions', true),
         shuffleAnswers: bool('shuffleAnswers', true),
         neutralizeOrdinals: bool('neutralizeOrdinals', true),
+        softenGameOver: bool('softenGameOver', true),
         debug: bool('Debug Logging', false)
     };
 
@@ -530,6 +545,7 @@ var PalQuizCore = (function () {
                     shuffleQuestions: C.shuffleQuestions,
                     shuffleAnswers: C.shuffleAnswers,
                     neutralizeOrdinals: C.neutralizeOrdinals,
+                    softenGameOver: C.softenGameOver,
                     injectHint: true
                 });
 

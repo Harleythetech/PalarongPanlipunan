@@ -54,13 +54,15 @@ function makeRuntime(pluginParams) {
     const party = {
         members() { return this._m; },
         _m: [
-            { hp: 100, mhp: 100, mp: 10, mmp: 10, isDead() { return this.hp === 0; }, gainHp(n) { this.hp += n; }, setHp(n) { this.hp = n; }, setMp(n) { this.mp = n; } },
-            { hp: 80, mhp: 80, mp: 10, mmp: 10, isDead() { return this.hp === 0; }, gainHp(n) { this.hp += n; }, setHp(n) { this.hp = n; }, setMp(n) { this.mp = n; } }
+            { hp: 100, mhp: 100, mp: 10, mmp: 10, isDead() { return this.hp === 0; }, gainHp(n) { this.hp += n; }, setHp(n) { this.hp = n; }, setMp(n) { this.mp = n; }, recoverAll() { this.hp = this.mhp; this.mp = this.mmp; } },
+            { hp: 80, mhp: 80, mp: 10, mmp: 10, isDead() { return this.hp === 0; }, gainHp(n) { this.hp += n; }, setHp(n) { this.hp = n; }, setMp(n) { this.mp = n; }, recoverAll() { this.hp = this.mhp; this.mp = this.mmp; } }
         ]
     };
 
+    let troopInterpreterCleared = false;
     const troop = {
         _dead: false,
+        _interpreter: { clear() { troopInterpreterCleared = true; } },
         members() { return [{ hp: this._dead ? 0 : 100 }]; },
         isAllDead() { return this._dead; }
     };
@@ -137,10 +139,16 @@ function makeRuntime(pluginParams) {
     const interpreter = {
         cmd(command, ...args) {
             sandbox.Game_Interpreter.prototype.pluginCommand.call(this, command, args);
+        },
+        // Mirrors command356: a single string, split on spaces.
+        line(str) {
+            const parts = String(str).split(' ');
+            const command = parts.shift();
+            sandbox.Game_Interpreter.prototype.pluginCommand.call(this, command, parts);
         }
     };
 
-    return { sandbox, vars, sws, party, troop, interpreter, BattleManager, soundLog, flashLog, stubLayer };
+    return { sandbox, vars, sws, party, troop, interpreter, BattleManager, soundLog, flashLog, stubLayer, troopCleared: () => troopInterpreterCleared };
 }
 
 const PARAMS = {
@@ -247,20 +255,60 @@ console.log('\nPalSupport — quiz outcome');
     W.troop._dead = true;
     W.interpreter.cmd('PalSupport', 'quizdone', '6');
     eq('won quiz leaves party alive', W.party._m[0].hp, 100);
-    eq('won quiz does not force defeat', W.BattleManager._result, null);
+    eq('won quiz does not end the battle itself', W.BattleManager._result, null);
 
     // Lost: no correct answer, troop still alive.
     const L = makeRuntime(PARAMS);
     L.BattleManager.setup(4, false, true);
     L.troop._dead = false;
+    L.party._m[0].hp = 30;                        // damaged by the quiz's own commands
     L.interpreter.cmd('PalSupport', 'quizdone', '6');
-    eq('lost quiz knocks party out', L.party._m[0].hp, 0);
-    eq('lost quiz knocks second member out', L.party._m[1].hp, 0);
 
+    eq('lost quiz knocks the party out so the engine sees a defeat', L.party._m[0].hp, 0);
+    eq('second member is knocked out too', L.party._m[1].hp, 0);
+    eq('lost quiz does not end the battle itself (engine does)', L.BattleManager._result, null);
+
+    // The engine's defeat path then calls endBattle(2); the hook heals them.
     L.BattleManager.endBattle(2);
-    eq('party restored after the quiz defeat', L.party._m[0].hp, 100);
-    eq('party mp restored after the quiz defeat', L.party._m[0].mp, 10);
-    eq('second member restored', L.party._m[1].hp, 80);
+    eq('party healed after the quiz defeat', L.party._m[0].hp, 100);
+    eq('party MP healed after the quiz defeat', L.party._m[0].mp, 10);
+    eq('second member healed too', L.party._m[1].hp, 80);
+    eq('a won fight is never touched by the heal hook', (function () {
+        const W2 = makeRuntime(PARAMS);
+        W2.BattleManager.setup(1, false, true);
+        W2.interpreter.cmd('PalBattleHUD', 'score', 'add', '1');
+        W2.party._m[0].hp = 37;
+        W2.BattleManager.endBattle(0);
+        return W2.party._m[0].hp;
+    })(), 37);
+}
+
+console.log('\nPalSupport — the tutorial Game Over command is neutralised');
+{
+    // Troop 1 ends its final wrong branches with a "Game Over" event command.
+    // It must be gone from the runtime page, or the run resets to the title.
+    const R = makeRuntime(PARAMS);
+    const core = R.sandbox.window.PalQuiz.core;
+    const src = R.sandbox.$dataTroops[1].pages[0].list;
+    check('the untouched troop page really contains Game Over',
+        src.some(c => c.code === 353));
+
+    const out = core.transform(src, Math.random, {
+        shuffleQuestions: true, shuffleAnswers: true,
+        neutralizeOrdinals: true, softenGameOver: true, injectHint: true
+    });
+    check('transformed page has no Game Over command',
+        !out.some(c => c.code === 353));
+    check('transformed page still ends with quizdone',
+        out.some(c => c.code === 356 && /quizdone/i.test(String(c.parameters[0]))));
+
+    // Off switch keeps the original behaviour.
+    const kept = core.transform(src, Math.random, {
+        shuffleQuestions: true, shuffleAnswers: true,
+        neutralizeOrdinals: true, softenGameOver: false, injectHint: true
+    });
+    check('softenGameOver=false keeps the Game Over command',
+        kept.some(c => c.code === 353));
 }
 
 console.log('\nPalSupport — candy items');
@@ -317,6 +365,36 @@ console.log('\nPalQuiz — runtime shuffle');
     D.BattleManager.setup(4, false, true);
     check('disabled shuffler leaves the page alone',
         JSON.stringify(D.sandbox.$dataTroops[4].pages[0].list) === JSON.stringify(raw));
+}
+
+console.log('\nPalQuiz — injected command shape');
+{
+    const R = makeRuntime(PARAMS);
+    const core = R.sandbox.window.PalQuiz.core;
+    const out = core.transform(R.sandbox.$dataTroops[1].pages[0].list, Math.random, {
+        shuffleQuestions: true, shuffleAnswers: true, neutralizeOrdinals: true, injectHint: true
+    });
+
+    const hints = out.filter(c => c.code === 356 && /^palsupport hint$/i.test(String(c.parameters[0] || '')));
+    const done = out.filter(c => c.code === 356 && /^palsupport quizdone/i.test(String(c.parameters[0] || '')));
+
+    // MV's command356 does params[0].split(" "), so the whole command must be
+    // ONE string. Storing ['PalSupport','hint'] silently does nothing at runtime.
+    check('hint command is one MV string (3 blocks)',
+        hints.length === 3 && hints.every(c => c.parameters.length === 1),
+        hints.map(c => c.parameters));
+    check('quizdone command is one MV string',
+        done.length === 1 && done[0].parameters.length === 1,
+        done.map(c => c.parameters));
+
+    // And it must actually dispatch through the engine's parser.
+    const before = R.vars[11];
+    R.BattleManager.setup(1, false, true);
+    R.vars[6] = 0;                                   // 0 correct -> quiz failed
+    R.interpreter.line(String(done[0].parameters[0]));
+    check('quizdone knocks the party out for the engine defeat path',
+        R.party._m[0].hp === 0, R.party._m[0].hp);
+    check('hint charges still sane', R.vars[11] === before || R.vars[11] === 2, R.vars[11]);
 }
 
 console.log('\n' + (failures === 0 ? 'ALL CHECKS PASSED' : failures + ' CHECK(S) FAILED'));

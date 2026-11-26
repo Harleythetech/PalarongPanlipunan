@@ -139,9 +139,10 @@
         { min: 500, max: Infinity, hp: 200, hints: 5, name: 'Katuwang' }
     ];
 
-    // Set when the quiz was failed and the party was knocked out on purpose so
-    // the normal "If Lose" path runs. Cleared by the endBattle hook, which also
-    // restores the party so they are not left dead on the map.
+    // Set when the quiz was failed and the party was knocked out on purpose, so
+    // the engine runs its normal defeat path. The endBattle hook then heals them
+    // back up: the engine only revives to 1 HP and most maps' "If Lose" branches
+    // never heal, which would leave the player walking around at 1 HP.
     var quizDefeat = false;
 
     // -------------------------------------------------------------------------
@@ -328,9 +329,13 @@
             return;
         }
 
-        // Never leave the player inside a battle whose command windows are
-        // hidden. Force the engine's own defeat path; the map's If Lose branch
-        // and the endBattle hook below take it from there.
+        // Failed round. The quiz is finished, so the fight has to end — but it
+        // must end as a real, visible defeat rather than stopping dead while
+        // everyone is still standing. Knock the party out and let the engine's
+        // own defeat path take over: it plays the defeat ME and message, then
+        // runs the map's existing "If Lose" branch (Arkin offers a retry).
+        // Safe because every one of these battles is started with canLose=true,
+        // and the tutorial's "Game Over" command is stripped by PalQuiz.
         quizDefeat = true;
         try {
             $gameParty.members().forEach(function (m) {
@@ -339,7 +344,7 @@
         } catch (e) { log('defeat push failed', e); }
 
         pop('KULANG PA', '#FF8A8A');
-        log('quiz done', correct + '/' + total, 'forced defeat');
+        log('quiz done', correct + '/' + total, 'defeat');
     }
 
     // -------------------------------------------------------------------------
@@ -618,20 +623,21 @@
         } catch (e) { log('battle setup failed', e); }
     };
 
-    // A failed quiz knocks the party out so the engine runs the normal defeat
-    // path. Restore them immediately afterwards: the existing If Lose branches
-    // do not heal, which would leave the player walking around with 0 HP.
+    // A failed quiz leaves the party at 0 HP so the engine runs its normal
+    // defeat path (defeat ME + message + the map's "If Lose" branch). Heal them
+    // once that path has been chosen; otherwise the engine's own
+    // reviveBattleMembers() only sets 1 HP and the player walks the map at 1 HP.
     var _BattleManager_endBattle = BattleManager.endBattle;
     BattleManager.endBattle = function (result) {
         _BattleManager_endBattle.apply(this, arguments);
         try {
             if (!quizDefeat) return;
             quizDefeat = false;
+            if (result === 0) return;              // safety: never touch a won fight
             $gameParty.members().forEach(function (m) {
-                m.setHp(m.mhp);
-                m.setMp(m.mmp);
+                if (m) m.recoverAll();
             });
-            log('quiz defeat: party restored');
+            log('quiz defeat: party healed');
         } catch (e) { log('post-defeat heal failed', e); }
     };
 
@@ -682,7 +688,7 @@
             var a1 = String((args && args[1]) || '').toLowerCase();
             var n  = Number(args && args[2]);
 
-            if (a0 === 'quizdone') { onQuizDone(n); return; }
+            if (a0 === 'quizdone') { onQuizDone(Number(args && args[1])); return; }
             if (a0 === 'hint')     { onHint(); return; }
 
             if (a0 === 'points') {
