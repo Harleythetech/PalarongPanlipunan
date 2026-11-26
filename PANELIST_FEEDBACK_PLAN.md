@@ -87,7 +87,7 @@ mismatch. The file on disk is untouched (verified byte-identical to `21885e1`).
 | # | Panel comment | Delivered |
 |---|---|---|
 | 1 | Reshuffle questions | In-memory block permutation **and** answer-option shuffle, re-drawn every battle |
-| 2 | Limited interactivity (mini games, bonus games) | **Already in the build**: the "Mang Isko" pick-three selection game in *Nayon ng Mayumi* — choose 3 of 6 examples of *kulturang materyal*, with per-option feedback, an anti-repeat guard and a retry loop. It gates the Shadow battle, so it sits in the critical path (§3.1) |
+| 2 | Limited interactivity (mini games, bonus games) | **Already in the build**: the "Mang Isko" pick-three selection game in *Nayon ng Mayumi* — choose 3 of 6 examples of *kulturang materyal*, with per-option feedback, an anti-repeat guard and a retry loop. It is part of the "interview the villagers" quest beat (§3.1) |
 | 3 | Another answer style | Two of them: the selection game above (pick-many instead of one answer), and answer-position shuffle inside every quiz |
 | 4 | Feedback system | SFX + screen flash/shake + floating score + Arkin reaction line + live tally on the HUD |
 | 4 | Damage curve | Correct answers 14–33, wrong answers scaled by quiz length (16 / 8 / 7, about half the party's HP if every answer is wrong); no single answer one-shots the enemy or the party, and no question is skipped |
@@ -128,8 +128,13 @@ How it behaves:
   bahay ay halimbawa ng kulturang materyal."* versus *"Mali! Ang puno ay bahagi
   ng kalikasan…"* — which is the feedback pattern comment #4 asks for, in a
   non-quiz format.
-- **It gates the quiz.** Finishing it advances the quest to the Shadow battle,
-  so the interactivity is in the critical path rather than a side activity.
+- **It is part of the quest.** Completing it clears the "talk to Mang Isko" beat
+  and moves the arrow on to the next four villagers. Be aware that nothing in the
+  data *enforces* it: the Shadow battle (`Map034` ev29) is an unconditional
+  touch-trigger, and no other event reads the mini-game's switches or counter, so
+  a player can walk past the game and fight the boss anyway. It is on the
+  intended path, not a hard gate — gating the boss on it would be the honest fix
+  (§10).
 
 **A real bug was found here and fixed.** The sixth option was labelled
 `Bulaklak` (flower) while its feedback still read *"Tama! Ang Damit na suot
@@ -142,6 +147,10 @@ and the lesson.
 
 **Could be improved (post-deadline, not started):**
 
+- **It is not enforced.** You can walk past Mang Isko and trigger the Shadow
+  battle anyway; nothing reads the mini-game's switches or counter. Gating
+  `Map034` ev29 on the mini-game's completion would make the interactivity
+  unskippable, which is what the panel comment is really asking for.
 - It grants no reward, so it does not feed the Candy Points economy the way the
   quiz victories now do.
 - It is a pick-many list, not a spatial or timed game; the treasure hunt and the
@@ -595,8 +604,9 @@ These need the actual game window; the harness cannot render or read input.
 15. Mobile scale 1.4: card and map counter do not overlap other HUD elements.
 16. Play **Mang Isko** in *Nayon ng Mayumi*: pick `Puno` or `Tubig` first → told
     `Mali!` and asked again; pick `Bahay` twice → the second pick is refused;
-    pick `Bahay`, `Tulay`, `Damit` → the quest advances to the Shadow battle. The
-    fourth option must read **`Damit`**, never `Bulaklak`.
+    pick `Bahay`, `Tulay`, `Damit` → his follow-up question appears, then the
+    `NavArrow` moves on and talking to him again gives only `Kamusta kayo bata?`.
+    The fourth option must read **`Damit`**, never `Bulaklak`.
 17. Confirm `Troops.json` is still byte-identical: `git diff 21885e1 -- data/Troops.json`.
 
 Watch specifically for: the support card rendering on top of a sprite, and the
@@ -612,6 +622,7 @@ not a replacement, so the panel answer does not depend on any of it landing.
 | Feature | Notes |
 |---|---|
 | **Mang Isko reward** | It currently grants nothing. One `candy` grant in its completion branch would make it pay into the Candy Points economy like the quiz victories do. |
+| **Gate the boss on the mini-game** | `Map034` ev29 (the Shadow battle) is an unconditional touch-trigger, so the selection game can be walked past. Adding a condition or a blocking event would make the interactivity mandatory. |
 | **Treasure hunt** | 5 clue NPCs on an existing map; reuses `MissionTracker` `CM` + `NavArrow`; each clue behind a self-switch so it cannot be farmed. Event-only, zero engine risk. |
 | **Matching mini-game** | 8 pairs / 60 s, `Scene_PalMatch`; +2 per pair, +20 perfect. |
 | **Ordering puzzle** | Arrange a timeline; third priority. |
