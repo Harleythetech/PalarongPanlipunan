@@ -144,8 +144,16 @@
  *       CM 7 Go to the Battle Field
  *       CM 3 Speak with the Village Elder
  *
+ *   CM <eventId>
+ *     If an event ID is given but NO objective text is provided, the mission
+ *     is automatically cleared (same as "CM clear").
+ *
+ *     Example:
+ *       CM 7     ← clears the mission (no text supplied)
+ *
  *   CM clear
- *     Clear the current mission (hides the panel, removes compass highlight).
+ *     Explicitly clear the current mission (hides the panel, removes compass
+ *     highlight).  Equivalent to calling CM with no objective text.
  *
  * ── NOTES ─────────────────────────────────────────────────────────────────────
  *
@@ -215,12 +223,14 @@ var $gameMissionTracker = null;
         this._eventId       = 0;
         this._objectiveText = '';
         this._prevDirection = 0;  // tracks last cardinal for diagonal detection
+        this._mapId         = 0;  // map the mission was issued on (event IDs are map-local)
     };
 
     Game_MissionTracker.prototype.setMission = function (eventId, text) {
         this._active        = true;
         this._eventId       = eventId;
         this._objectiveText = text;
+        this._mapId         = $gameMap ? $gameMap.mapId() : 0;
     };
 
     Game_MissionTracker.prototype.clearMission = function () {
@@ -228,6 +238,7 @@ var $gameMissionTracker = null;
         this._eventId       = 0;
         this._objectiveText = '';
         this._prevDirection = 0;
+        this._mapId         = 0;
     };
 
     Game_MissionTracker.prototype.isActive = function () {
@@ -240,6 +251,10 @@ var $gameMissionTracker = null;
 
     Game_MissionTracker.prototype.objectiveText = function () {
         return this._objectiveText;
+    };
+
+    Game_MissionTracker.prototype.mapId = function () {
+        return this._mapId;
     };
 
     /**
@@ -354,6 +369,10 @@ var $gameMissionTracker = null;
             if (!$gameMissionTracker._prevDirection) {
                 $gameMissionTracker._prevDirection = 0;
             }
+            // Guard against saves that predate _mapId
+            if (typeof $gameMissionTracker._mapId !== 'number') {
+                $gameMissionTracker._mapId = 0;
+            }
         } else {
             $gameMissionTracker = new Game_MissionTracker();
         }
@@ -383,11 +402,13 @@ var $gameMissionTracker = null;
             return;
         }
 
-        // Objective text: everything after the first argument, joined back
+        // Objective text: everything after the first argument, joined back.
+        // If no text is provided, treat the command as an implicit clear.
         var text = args.slice(1).join(' ');
         if (!text) {
-            if (window.RPGRXDebug && window.RPGRXDebug('MissionTracker')) {
-                console.warn('MissionTracker: no objective text provided');
+            $gameMissionTracker.clearMission();
+            if (SceneManager._scene instanceof Scene_Map) {
+                SceneManager._scene.refreshMissionTrackerHUD();
             }
             return;
         }
@@ -793,17 +814,28 @@ var $gameMissionTracker = null;
     };
 
     /**
-     * Reset mission if the target event does not exist on the new map.
-     * (The compass stays visible; only the panel hides.)
+     * Clear missions that do not belong to the map the player just entered.
+     *
+     * Missions target an event ID, and event IDs are only meaningful on the
+     * map that issued the mission.  When the player transfers to another map,
+     * the old objective no longer applies; maps that need a mission issue
+     * their own CM command (usually from an autorun/parallel event).
+     *
+     * The compass stays visible (un-highlighted); only the panel disappears.
      */
     var _alias_Scene_Map_onMapLoaded = Scene_Map.prototype.onMapLoaded;
     Scene_Map.prototype.onMapLoaded = function () {
         _alias_Scene_Map_onMapLoaded.call(this);
-        if ($gameMissionTracker && $gameMissionTracker.isActive()) {
-            // If the event doesn't exist here, don't auto-clear — the event
-            // may be on another map.  The panel simply won't show.
-            // This keeps the mission state across map transfers.
-        }
+
+        if (!$gameMissionTracker || !$gameMissionTracker.isActive()) return;
+
+        var sameMap      = $gameMissionTracker.mapId() === $gameMap.mapId();
+        var targetExists = $gameMissionTracker.targetEvent() !== null;
+
+        if (sameMap && targetExists) return;
+
+        $gameMissionTracker.clearMission();
+        this.refreshMissionTrackerHUD();
     };
 
 })();
