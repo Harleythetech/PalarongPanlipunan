@@ -77,7 +77,7 @@
  *
  * PLUGIN COMMANDS
  *
- *   PalSupport quizdone <total>
+ *   PalSupport quizdone <total> <pass>
  *       Evaluates the quiz. Injected automatically by PalQuiz at the end of
  *       the shuffled question chain. Passing zeroes the troop's HP so the
  *       engine ends the battle through the normal victory path.
@@ -308,24 +308,37 @@
         log('hint used', 'points', gv(C.pointsVar), 'support', gv(C.supportVar));
     }
 
-    function onQuizDone(total) {
+    function onQuizDone(total, pass) {
         var correct = gv(C.correctVar);
         var wrong   = gv(C.wrongVar);
         total = Math.max(1, Number(total) || 0, correct + wrong);
 
+        // PalQuiz injects the number of correct answers this quiz needs. Fall
+        // back to half the questions when it is missing (older saves, manual
+        // testing), so the command always has a usable threshold.
+        var need = Number(pass);
+        if (!(need > 0)) need = Math.ceil(total / 2);
+        need = Math.min(total, Math.max(1, Math.round(need)));
+
         refreshState();
         updateAccuracy();
 
-        var dead = false;
-        try {
-            dead = !!($gameTroop && $gameTroop.isAllDead && $gameTroop.isAllDead());
-        } catch (e) { dead = false; }
+        if (correct >= need) {
+            // Enough right answers: finish the enemy so the engine runs its own
+            // victory path (the same route the old 100-damage finisher used).
+            // This happens here, not on the individual answer, because MV ends
+            // the battle the moment the last enemy dies and that would cut the
+            // quiz short.
+            try {
+                if ($gameTroop && $gameTroop.members) {
+                    $gameTroop.members().forEach(function (m) {
+                        if (m && !m.isDead()) m.gainHp(-m.hp);
+                    });
+                }
+            } catch (e) { log('victory finisher failed', e); }
 
-        // Each correct answer already deals lethal damage inside the troop
-        // event, so a living troop means the round was failed completely.
-        if (dead) {
             pop('PANALO!', '#FFD700');
-            log('quiz done', correct + '/' + total, 'victory');
+            log('quiz done', correct + '/' + total, 'victory (needed ' + need + ')');
             return;
         }
 
@@ -344,7 +357,7 @@
         } catch (e) { log('defeat push failed', e); }
 
         pop('KULANG PA', '#FF8A8A');
-        log('quiz done', correct + '/' + total, 'defeat');
+        log('quiz done', correct + '/' + total, 'defeat (needed ' + need + ')');
     }
 
     // -------------------------------------------------------------------------
@@ -688,7 +701,7 @@
             var a1 = String((args && args[1]) || '').toLowerCase();
             var n  = Number(args && args[2]);
 
-            if (a0 === 'quizdone') { onQuizDone(Number(args && args[1])); return; }
+            if (a0 === 'quizdone') { onQuizDone(Number(args && args[1]), Number(args && args[2])); return; }
             if (a0 === 'hint')     { onHint(); return; }
 
             if (a0 === 'points') {

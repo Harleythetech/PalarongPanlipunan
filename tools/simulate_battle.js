@@ -7,7 +7,10 @@
 //   - execution terminates (never falls off the end mid-question)
 //   - every question is asked exactly once
 //   - "PalSupport quizdone" runs exactly once, at the very end
-//   - the enemy takes damage on exactly the correct answers
+//   - the enemy takes damage on exactly the correct answers, and only then
+//   - the damage curve is sane: no answer kills the enemy mid-quiz, no single
+//     wrong answer can knock out a party member, and quizdone carries the
+//     number of correct answers needed to pass
 //   - no jump target is missing
 //
 // Hint branches are excluded from the enumeration because they intentionally
@@ -23,6 +26,11 @@ const core = require('../js/plugins/PalQuiz.js');
 
 const ROOT = path.resolve(__dirname, '..');
 const troops = JSON.parse(fs.readFileSync(path.join(ROOT, 'data', 'Troops.json'), 'utf8'));
+const enemies = JSON.parse(fs.readFileSync(path.join(ROOT, 'data', 'Enemies.json'), 'utf8'));
+
+const PARTY_MAX_HP = 100;   // Harold at level 1
+const PASS_RATIO = 0.5;
+const WRONG_SHARE = 0.1;
 
 let failures = 0;
 let paths = 0;
@@ -154,17 +162,67 @@ for (const troop of troops) {
     });
     const uniform = choicesPer.every(v => v === choicesPer[0]);
 
+    const enemyMaxHp = Math.max(1, ...(troop.members || []).map(m => {
+        const e = enemies[m.enemyId];
+        return e && e.params ? Number(e.params[0]) || 0 : 0;
+    }));
+    const plan = core.damagePlan(nQuestions, {
+        enemyMaxHp: enemyMaxHp,
+        partyMaxHp: PARTY_MAX_HP,
+        passRatio: PASS_RATIO,
+        wrongDamageShare: WRONG_SHARE
+    });
+
+    // One shuffle for the entire battle, exactly like the game: choices do not
+    // re-shuffle between answers, so a pick index always means the same answer.
+    // (Seeding per path made "answer everything correctly" unreachable.)
+    const out = core.transform(page.list, mulberry32(troop.id * 7919), {
+        shuffleQuestions: true,
+        shuffleAnswers: true,
+        neutralizeOrdinals: true,
+        softenGameOver: true,
+        injectHint: true,
+        normalizeDamage: true,
+        enemyMaxHp: enemyMaxHp,
+        partyMaxHp: PARTY_MAX_HP,
+        passRatio: PASS_RATIO,
+        wrongDamageShare: WRONG_SHARE
+    });
+    if (!out) {
+        console.error(`troop ${troop.id} "${troop.name}": transform returned null`);
+        failures++;
+        continue;
+    }
+
     let troopFail = 0;
     const damageByCorrect = new Map();
 
+    // The normalised commands must all carry the planned values.
+    const wrongHits = out.filter(c => c.code === 311);
+    if (!wrongHits.length) {
+        console.error(`troop ${troop.id}: no party-damage command on wrong answers`);
+        failures++;
+    }
+    wrongHits.forEach(c => {
+        if (c.parameters[4] !== plan.party) {
+            console.error(`troop ${troop.id}: wrong-answer damage is ${c.parameters[4]}, expected ${plan.party}`);
+            failures++;
+        }
+    });
+    const enemyHits = out.filter(c => c.code === 331);
+    if (enemyHits.length !== nQuestions) {
+        console.error(`troop ${troop.id}: ${enemyHits.length} enemy-damage commands for ${nQuestions} questions`);
+        failures++;
+    }
+    enemyHits.forEach(c => {
+        if (c.parameters[3] !== plan.enemy) {
+            console.error(`troop ${troop.id}: correct-answer damage is ${c.parameters[3]}, expected ${plan.enemy}`);
+            failures++;
+        }
+    });
+
     const check = (picks) => {
         paths++;
-        // Build a fresh transformed page for this run, then execute it.
-        const out = core.transform(page.list, mulberry32(picks.join('') * 7919 + troop.id), {
-            shuffleQuestions: true, shuffleAnswers: true, neutralizeOrdinals: true, injectHint: true
-        });
-        if (!out) { troopFail++; if (troopFail < 4) console.error(`  troop ${troop.id}: transform null`); return; }
-
         const res = run(out, (i) => picks[i % picks.length]);
         if (res.error) { troopFail++; if (troopFail < 4) console.error(`  troop ${troop.id}: ${res.error}`); return; }
 
@@ -174,6 +232,9 @@ for (const troop of troops) {
         if (t.quizdone !== 1) problems.push(`quizdone ${t.quizdone}`);
         if (t.correct + t.wrong !== nQuestions) problems.push(`scored ${t.correct + t.wrong}/${nQuestions}`);
         if (t.gameOver !== 0) problems.push('Game Over command executed ' + t.gameOver + 'x');
+        if (t.damage !== t.correct * plan.enemy) {
+            problems.push(`damage ${t.damage} for ${t.correct} correct, expected ${t.correct * plan.enemy}`);
+        }
         if (problems.length) {
             troopFail++;
             if (troopFail < 4) console.error(`  troop ${troop.id} picks=${picks}: ${problems.join(', ')}`);
@@ -197,14 +258,45 @@ for (const troop of troops) {
     const status = troopFail === 0 ? 'OK' : troopFail + ' FAILED';
     console.log(`troop ${troop.id} "${troop.name}": ${nQuestions} questions, ${Math.pow(choicesPer[0], nQuestions)} paths -> ${status}`);
     if (troopFail === 0) {
-        // Enemy HP is 100 for every quiz battle, so damage >= 100 wins.
-        const winners = [...damageByCorrect.keys()].filter(k =>
-            [...damageByCorrect.get(k)].some(d => d >= 100)).sort((a, b) => a - b);
-        const all = [...damageByCorrect.keys()].sort((a, b) => a - b);
         const maxDamage = Math.max(...[...damageByCorrect.values()].map(s => Math.max(...s)));
-        console.log(`      wins with ${winners.join('/')} correct; all-correct damage ${maxDamage}/100`);
-        if (!winners.includes(all[all.length - 1])) {
-            console.error('      FAIL: answering everything correctly does not win');
+        const scores = [...damageByCorrect.keys()].sort((a, b) => a - b);
+
+        console.log(`      correct: ${plan.enemy} dmg (never lethal)  ->  ${plan.steps}/${nQuestions} right passes`);
+        console.log(`      wrong:   ${plan.party} dmg  ->  ${nQuestions} wrong = ${plan.party * nQuestions}/${PARTY_MAX_HP} HP`);
+        console.log(`      max enemy damage ${maxDamage}/${enemyMaxHp}; scores reached ${scores.join('/')}`);
+
+        // Every possible score must be reachable.
+        const all = [];
+        for (let k = 0; k <= nQuestions; k++) all.push(k);
+        if (scores.join('/') !== all.join('/')) {
+            console.error(`      FAIL: scores ${scores.join('/')} != ${all.join('/')}`);
+            failures++;
+        }
+
+        // The enemy has to survive every path: MV ends the battle the moment the
+        // last enemy dies, which would cut the quiz short and skip quizdone.
+        if (maxDamage >= enemyMaxHp) {
+            console.error('      FAIL: the enemy can die before quizdone (the quiz would end early)');
+            failures++;
+        }
+
+        if (plan.party >= PARTY_MAX_HP) {
+            console.error('      FAIL: one wrong answer can knock out a party member');
+            failures++;
+        }
+
+        // And the injected command must carry the pass threshold.
+        const done = out.filter(c => c.code === 356 && /^palsupport quizdone/i.test(String(c.parameters[0])));
+        const want = 'PalSupport quizdone ' + nQuestions + ' ' + plan.steps;
+        if (done.length !== 1 || String(done[0].parameters[0]) !== want) {
+            console.error(`      FAIL: expected "${want}", got ${done.map(c => c.parameters[0]).join(' | ') || 'none'}`);
+            failures++;
+        }
+
+        // Sanity: the pass threshold must be reachable and not the whole quiz
+        // unless passRatio demands it.
+        if (plan.steps < 1 || plan.steps > nQuestions) {
+            console.error(`      FAIL: pass threshold ${plan.steps} out of range for ${nQuestions} questions`);
             failures++;
         }
     } else {

@@ -60,11 +60,16 @@ function makeRuntime(pluginParams) {
     };
 
     let troopInterpreterCleared = false;
+    const troopMembers = [{
+        hp: 100,
+        isDead() { return this.hp === 0; },
+        gainHp(n) { this.hp = Math.min(this.hp + n, 100); }
+    }];
     const troop = {
         _dead: false,
         _interpreter: { clear() { troopInterpreterCleared = true; } },
-        members() { return [{ hp: this._dead ? 0 : 100 }]; },
-        isAllDead() { return this._dead; }
+        members() { return troopMembers; },
+        isAllDead() { return this._dead || troopMembers.every(m => m.isDead()); }
     };
 
     const BattleManager = {
@@ -249,24 +254,31 @@ console.log('\nPalSupport — hint cost');
 
 console.log('\nPalSupport — quiz outcome');
 {
-    // Won: the troop is already dead from the event's own damage commands.
+    // Passed: enough right answers. quizdone applies the killing blow so the
+    // engine's own victory path runs, and the party is left alone.
     const W = makeRuntime(PARAMS);
     W.BattleManager.setup(4, false, true);
-    W.troop._dead = true;
-    W.interpreter.cmd('PalSupport', 'quizdone', '6');
-    eq('won quiz leaves party alive', W.party._m[0].hp, 100);
-    eq('won quiz does not end the battle itself', W.BattleManager._result, null);
+    W.vars[6] = 4;                                  // Quiz_Correct
+    W.vars[7] = 3;                                  // Quiz_Wrong
+    W.interpreter.cmd('PalSupport', 'quizdone', '7', '4');
+    check('passed quiz kills the troop', W.troop.isAllDead(), W.troop.members()[0].hp);
+    eq('passed quiz leaves party alive', W.party._m[0].hp, 100);
+    eq('passed quiz does not end the battle itself', W.BattleManager._result, null);
+    W.BattleManager.endBattle(0);
+    eq('passed quiz is never healed over by the defeat hook', W.party._m[0].hp, 100);
 
-    // Lost: no correct answer, troop still alive.
+    // Failed: fewer right answers than the threshold.
     const L = makeRuntime(PARAMS);
     L.BattleManager.setup(4, false, true);
     L.troop._dead = false;
+    L.vars[6] = 1;
+    L.vars[7] = 6;
     L.party._m[0].hp = 30;                        // damaged by the quiz's own commands
-    L.interpreter.cmd('PalSupport', 'quizdone', '6');
+    L.interpreter.cmd('PalSupport', 'quizdone', '7', '4');
 
-    eq('lost quiz knocks the party out so the engine sees a defeat', L.party._m[0].hp, 0);
+    eq('failed quiz knocks the party out so the engine sees a defeat', L.party._m[0].hp, 0);
     eq('second member is knocked out too', L.party._m[1].hp, 0);
-    eq('lost quiz does not end the battle itself (engine does)', L.BattleManager._result, null);
+    eq('failed quiz does not end the battle itself (engine does)', L.BattleManager._result, null);
 
     // The engine's defeat path then calls endBattle(2); the hook heals them.
     L.BattleManager.endBattle(2);
@@ -281,6 +293,15 @@ console.log('\nPalSupport — quiz outcome');
         W2.BattleManager.endBattle(0);
         return W2.party._m[0].hp;
     })(), 37);
+
+    // Without the injected threshold the command still has a safe default.
+    const D = makeRuntime(PARAMS);
+    D.BattleManager.setup(4, false, true);
+    D.vars[6] = 3;                                  // half of 6
+    D.interpreter.cmd('PalSupport', 'quizdone', '6');
+    check('quizdone without a threshold defaults to half the questions',
+        D.troop.isAllDead(), D.troop.members()[0].hp);
+    eq('default threshold leaves the party alive', D.party._m[0].hp, 100);
 }
 
 console.log('\nPalSupport — the tutorial Game Over command is neutralised');
@@ -365,6 +386,16 @@ console.log('\nPalQuiz — runtime shuffle');
     D.BattleManager.setup(4, false, true);
     check('disabled shuffler leaves the page alone',
         JSON.stringify(D.sandbox.$dataTroops[4].pages[0].list) === JSON.stringify(raw));
+
+    // PalSupport kill switch on: damage must stay as authored, because the old
+    // last-question 100 is what ends the battle when quizdone is ignored.
+    const S = makeRuntime(PARAMS);
+    S.sws[31] = true;                     // PalSupport_Disabled
+    S.BattleManager.setup(1, false, true);
+    const dmg = S.sandbox.$dataTroops[1].pages[0].list
+        .filter(c => c.code === 331).map(c => c.parameters[3]);
+    check('with PalSupport off, authored damage is kept so the battle can end',
+        dmg.includes(100), dmg);
 }
 
 console.log('\nPalQuiz — injected command shape');
@@ -395,6 +426,20 @@ console.log('\nPalQuiz — injected command shape');
     check('quizdone knocks the party out for the engine defeat path',
         R.party._m[0].hp === 0, R.party._m[0].hp);
     check('hint charges still sane', R.vars[11] === before || R.vars[11] === 2, R.vars[11]);
+
+    // Same command, passing score: the troop must die instead.
+    const P = makeRuntime(PARAMS);
+    const pout = core.transform(P.sandbox.$dataTroops[1].pages[0].list, Math.random, {
+        shuffleQuestions: true, shuffleAnswers: true, neutralizeOrdinals: true, injectHint: true
+    });
+    const pdone = pout.filter(c => c.code === 356 && /^palsupport quizdone/i.test(String(c.parameters[0] || '')));
+    P.BattleManager.setup(1, false, true);
+    P.vars[6] = 2;                                   // 2 of 3 is a pass
+    P.interpreter.line(String(pdone[0].parameters[0]));
+    check('quizdone finishes the enemy when the score passes', P.troop.isAllDead(), P.troop.members()[0].hp);
+    eq('quizdone leaves the party alive when the score passes', P.party._m[0].hp, 100);
+    check('the injected command carries the pass threshold',
+        /\s3\s2$/.test(String(pdone[0].parameters[0])), pdone[0].parameters[0]);
 }
 
 console.log('\n' + (failures === 0 ? 'ALL CHECKS PASSED' : failures + ' CHECK(S) FAILED'));

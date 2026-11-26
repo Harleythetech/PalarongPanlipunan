@@ -25,6 +25,23 @@
  * @param softenGameOver
  * @default true
  *
+ * @param supportSwitchId
+ * @type number
+ * @default 31
+ *
+ * @param normalizeDamage
+ * @default true
+ *
+ * @param passRatio
+ * @type number
+ * @decimals 2
+ * @default 0.5
+ *
+ * @param wrongDamageShare
+ * @type number
+ * @decimals 2
+ * @default 0.1
+ *
  * @param Debug Logging
  * @default false
  *
@@ -82,6 +99,11 @@ var PalQuizCore = (function () {
     ];
     var SPEAKER_RE = /^[^:\n]{1,24}:\s*["'\u201c\u201d]?\s*/;
     var COMMENT_RE = /^\/\/\s*(first|second|third|fourth|fifth|sixth|seventh|last|question|unang|ikalawa|ikatlo)/i;
+
+    // Damage balancing defaults. Half the answers right is a pass; one wrong
+    // answer costs a tenth of the party's HP.
+    var DEFAULT_PASS_RATIO = 0.5;
+    var DEFAULT_WRONG_SHARE = 0.1;
 
     function clone(cmd) {
         return {
@@ -406,8 +428,53 @@ var PalQuizCore = (function () {
     }
 
     // -------------------------------------------------------------------------
-    // Public entry point
+    // Damage balancing
     // -------------------------------------------------------------------------
+    //
+    // The shipped troop pages escalate damage and finish on 100. With a 100 HP
+    // enemy and 100 HP Harold, that last 100 is both an instant win and an
+    // instant knockout, and the earlier steps (25, 50 on a 3-question quiz)
+    // swing just as hard. The curve is all-or-nothing rather than a curve.
+    //
+    // Replacement rule:
+    //   correct -> floor((enemyMaxHp - 1) / questions)
+    //              Every correct answer is visible but can never be lethal on
+    //              its own. MV ends the battle the instant the last enemy dies,
+    //              which would cut the quiz short and skip the PalSupport
+    //              quizdone command at the end of the page. The killing blow is
+    //              applied once by quizdone, after the score is known.
+    //   wrong   -> round(partyMaxHp * wrongDamageShare), flat.
+    //              A tenth of the party's HP by default: readable, and no
+    //              single wrong answer can knock anyone out.
+    //
+    // Returns {enemy, party, steps, passRatio}.
+    function damagePlan(questions, opts) {
+        opts = opts || {};
+        var n = Math.max(1, Number(questions) || 1);
+        var enemyMax = Math.max(1, Number(opts.enemyMaxHp) || 100);
+        var partyMax = Math.max(1, Number(opts.partyMaxHp) || 100);
+
+        var pass = Number(opts.passRatio);
+        if (!(pass > 0) || pass >= 1) pass = DEFAULT_PASS_RATIO;
+        pass = Math.min(0.95, Math.max(0.25, pass));
+
+        var share = Number(opts.wrongDamageShare);
+        if (!(share > 0)) share = DEFAULT_WRONG_SHARE;
+        share = Math.min(0.5, share);
+
+        // How many correct answers are required. Half of an odd number of
+        // questions rounds up, so 7 questions needs 4.
+        var steps = Math.max(1, Math.ceil(pass * n));
+
+        // Enough to move the bar, never enough to end the battle.
+        var enemy = Math.max(1, Math.floor((enemyMax - 1) / n));
+
+        var party = Math.max(1, Math.round(partyMax * share));
+        if (party >= partyMax) party = Math.max(1, partyMax - 1);
+
+        return { enemy: enemy, party: party, steps: steps, passRatio: pass };
+    }
+
     function transform(list, rng, opts) {
         rng = rng || Math.random;
         opts = opts || {};
@@ -453,12 +520,35 @@ var PalQuizCore = (function () {
             result = result.filter(function (c) { return c.code !== 353; });
         }
 
+        // The score needed to pass and the damage curve are decided together so
+        // the injected quizdone command and the numbers can never disagree.
+        var plan = damagePlan(total, opts);
+
+        // The shipped damage numbers are all-or-nothing: the last question of
+        // every quiz deals exactly 100, which one-shots the 100 HP enemy AND
+        // one-shots 100 HP Harold. Replace them with an even spread. Runtime
+        // copy only.
+        if (opts.normalizeDamage !== false) {
+            for (var d = 0; d < result.length; d++) {
+                var dc = result[d];
+                // Only touch constant operands. A variable-based command stores
+                // a variable id there and must be left exactly as authored.
+                if (dc.code === 331 && dc.parameters && dc.parameters.length >= 4
+                        && dc.parameters[2] === 0) {
+                    dc.parameters[3] = plan.enemy;
+                } else if (dc.code === 311 && dc.parameters && dc.parameters.length >= 5
+                        && dc.parameters[3] === 0) {
+                    dc.parameters[4] = plan.party;
+                }
+            }
+        }
+
         // quizdone goes just before the terminating command.
         var insertAt = result.length;
         while (insertAt > 0 && result[insertAt - 1].code === 0) insertAt--;
         result.splice(insertAt, 0, {
             code: 356, indent: 0,
-            parameters: ['PalSupport quizdone ' + total]
+            parameters: ['PalSupport quizdone ' + total + ' ' + plan.steps]
         });
 
         // ---- post-conditions --------------------------------------------------
@@ -486,6 +576,7 @@ var PalQuizCore = (function () {
         stripOrdinals: stripOrdinals,
         isOrdinal: isOrdinal,
         allJumpTargetsResolve: allJumpTargetsResolve,
+        damagePlan: damagePlan,
         transform: transform
     };
 })();
@@ -506,10 +597,14 @@ var PalQuizCore = (function () {
 
     var C = {
         disableSwitch: num('enabledSwitchId', 30),
+        supportSwitch: num('supportSwitchId', 31),
         shuffleQuestions: bool('shuffleQuestions', true),
         shuffleAnswers: bool('shuffleAnswers', true),
         neutralizeOrdinals: bool('neutralizeOrdinals', true),
         softenGameOver: bool('softenGameOver', true),
+        normalizeDamage: bool('normalizeDamage', true),
+        passRatio: num('passRatio', 0.5),
+        wrongDamageShare: num('wrongDamageShare', 0.1),
         debug: bool('Debug Logging', false)
     };
 
@@ -520,12 +615,50 @@ var PalQuizCore = (function () {
         catch (e) { return true; }
     }
 
+    // PalSupport decides the battle result inside quizdone. If that plugin is
+    // switched off, the damage must stay as authored: the original
+    // last-question 100 is what ends the battle, and non-lethal numbers with no
+    // quizdone would leave the player stuck in a fight that cannot finish.
+    function supportDisabled() {
+        try { return $gameSwitches && $gameSwitches.value(C.supportSwitch) === true; }
+        catch (e) { return true; }
+    }
+
     function log() {
         if (!C.debug) return;
         console.log.apply(console, [NAME].concat([].slice.call(arguments)));
     }
 
     function deepCopy(list) { return JSON.parse(JSON.stringify(list || [])); }
+
+    // Highest max HP in the troop. Every Change Enemy HP command targets all
+    // enemies at once (index -1), so the toughest member sets how much each
+    // correct answer must deal for `steps` answers to finish the fight.
+    function troopMaxHp(troop) {
+        var best = 0;
+        try {
+            (troop.members || []).forEach(function (m) {
+                var e = $dataEnemies && $dataEnemies[m.enemyId];
+                var hp = e && e.params ? Number(e.params[0]) || 0 : 0;
+                if (hp > best) best = hp;
+            });
+        } catch (e) { best = 0; }
+        return best > 0 ? best : 100;
+    }
+
+    // Frailest battle member's max HP. A wrong answer hits the whole party with
+    // one value, so basing it on the smallest pool keeps the share honest and
+    // guarantees nobody can be knocked out by a single wrong answer.
+    function partyMaxHp() {
+        var worst = 0;
+        try {
+            var list = ($gameParty && $gameParty.battleMembers) ? $gameParty.battleMembers() : [];
+            list.forEach(function (m) {
+                if (m && m.mhp > 0 && (worst === 0 || m.mhp < worst)) worst = m.mhp;
+            });
+        } catch (e) { /* fall through */ }
+        return worst > 0 ? worst : 100;
+    }
 
     function prepare(troopId) {
         try {
@@ -537,6 +670,9 @@ var PalQuizCore = (function () {
                 pristine[troopId] = troop.pages.map(function (pg) { return deepCopy(pg.list); });
             }
 
+            var enemyMax = troopMaxHp(troop);
+            var partyMax = partyMaxHp();
+
             for (var i = 0; i < troop.pages.length; i++) {
                 var src = pristine[troopId][i];
                 if (!src || !src.length) continue;
@@ -546,6 +682,11 @@ var PalQuizCore = (function () {
                     shuffleAnswers: C.shuffleAnswers,
                     neutralizeOrdinals: C.neutralizeOrdinals,
                     softenGameOver: C.softenGameOver,
+                    normalizeDamage: C.normalizeDamage && !supportDisabled(),
+                    passRatio: C.passRatio,
+                    wrongDamageShare: C.wrongDamageShare,
+                    enemyMaxHp: enemyMax,
+                    partyMaxHp: partyMax,
                     injectHint: true
                 });
 

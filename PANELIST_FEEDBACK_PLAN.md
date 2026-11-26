@@ -71,7 +71,7 @@ mismatch. The file on disk is untouched (verified byte-identical to `21885e1`).
 |---|---|---|---|
 | B1 | Battle score clobbered story counters | `BattleHUD` used variable **1** (`Conversation_Count`) and **2** (`Material_Count`) and zeroed both on battle start | Repointed to V3/V4 |
 | B2 | Hints limited to 2 for the whole game | `Hint_Count` (V15) was set once (tutorial) and only ever decremented | Refilled per battle from Arkin's rank; gate now actually works |
-| B3 | Invisible battle commands | `BattleHUD` hides party/actor/status windows | A failed quiz no longer drops the player into that state (§4.3) |
+| B3 | Invisible battle commands | `BattleHUD` hides party/actor/status windows | A failed quiz no longer drops the player into that state (§4.4) |
 | B4 | Quiz did not clearly decide the fight | — | Confirmed it already does (100 damage vs 100 HP); documented instead of rebalanced |
 | B5 | Candy was a blank item | icon 0, empty description, no effect | Icon, description, non-consumable, `<CandyPoint:10>` |
 
@@ -90,6 +90,7 @@ mismatch. The file on disk is untouched (verified byte-identical to `21885e1`).
 | 4 | Feedback system | SFX + screen flash/shake + floating score + Arkin reaction line + live tally on the HUD |
 | 5 | Candy points | One **Candy Points** currency, earning rules, rank unlock at 100, counter in battle **and** on the map |
 | 6 | Arkin health / support | 0–100 support gauge, ranks 1–4, hint charges, exhausted state, per-battle recovery |
+| 4 | Damage curve | Correct answers 14–33, wrong answers a flat 10 %; no single answer one-shots the enemy or the party, and no question is skipped |
 | 3 | Another answer style | Answer-position shuffle (choices presented in a different order each time) |
 
 Deferred: treasure hunt, matching mini-game, ordering puzzle, candy shop,
@@ -149,21 +150,57 @@ gauge, `Pahiwatig n/N`, `Kendi <points>`, and a `Tama / Mali / %` tally.
 4. Shuffle answer options; the hint option stays last; each branch moves with
    its own choice text.
 5. Strip any `Game Over` (353) command from the runtime copy only.
-6. Remove ordinal filler (`Ikalawang katanungan.`, `Huling tanong.`,
+6. Replace the all-or-nothing damage numbers with a flat curve (see 4.3).
+7. Remove ordinal filler (`Ikalawang katanungan.`, `Huling tanong.`,
    `Fanatio:" Para naman sa pangalawang tanong.`) so a moved block never lies
    about its position. Real questions that merely mention an ordinal are kept.
-7. Append `PalSupport quizdone <n>`.
-8. Validate again; any mismatch returns the original list untouched.
+8. Append `PalSupport quizdone <n>`.
+9. Validate again; any mismatch returns the original list untouched.
 
-### 4.3 Battle outcome (the safe part)
+### 4.3 Damage curve
 
-- **Pass** (enemy already dead from its own `−100 HP` command): nothing is
-  changed. The engine's normal victory path runs the existing `If Win` branch.
-- **Fail** (enemy alive ⇒ no correct answers): the party is knocked out so the
-  engine runs its **normal defeat path** — defeat ME, defeat message, actor
-  collapse — which fires the existing `If Lose` branch (Arkin: "magbasa muna
-  tayo ng mga tala…"). The `endBattle` hook then restores the party, because the
-  engine only revives to 1 HP and those `If Lose` branches never heal.
+The shipped numbers are not a curve: the last question of every quiz deals
+exactly `100`, which one-shots the `100 HP` enemy *and* one-shots `100 HP`
+Harold, while a 3-question quiz jumps `25 → 50 → 100`. Answering correctly was
+sometimes an instant win, and answering wrong was sometimes an instant knockout.
+
+Rewritten in the runtime copy only:
+
+| Event | Formula | 3 questions | 6 questions | 7 questions |
+|---|---|---|---|---|
+| Correct answer | `floor((enemyMaxHp − 1) / questions)` | 33 | 16 | 14 |
+| Wrong answer | `round(partyMaxHp × wrongDamageShare)` | 10 | 10 | 10 |
+| Answers needed to pass | `ceil(passRatio × n)` | 2/3 | 3/6 | 4/7 |
+| Enemy HP left after all correct | `enemyMaxHp − n × damage` | 1 | 4 | 2 |
+
+- Every correct answer is deliberately **non-lethal**. MV ends the battle the
+  moment the last enemy dies; a lethal answer would cut the quiz short and skip
+  the `quizdone` command at the end of the page. The killing blow is applied once
+  by `quizdone`, after the score is known.
+- `passRatio` defaults to `0.5`; `wrongDamageShare` to `0.1`.
+- Enemy HP is read from `Enemies.json` (highest member, because `Change Enemy HP`
+  targets every enemy at once).
+- Party HP is read from the frailest battle member, so one wrong answer can never
+  knock anybody out.
+- Only constant operands are rewritten; variable-driven commands are untouched.
+- Switches: `normalizeDamage` (default on). Off = the original numbers.
+- If PalSupport is switched off (S31), normalization is skipped too, so the
+  authored last-question finisher still ends the battle. Otherwise the quiz
+  could never finish.
+
+### 4.4 Battle outcome (the safe part)
+
+- **Pass** (at least `steps` correct answers): `quizdone` applies the finisher, so
+  the enemy dies at the very end and the engine's normal victory path runs the
+  existing `If Win` branch. No question is ever skipped.
+- **Fail** (fewer than `steps` correct): the party is knocked out so the engine
+  runs its **normal defeat path** — defeat ME, defeat message, actor collapse —
+  which fires the existing `If Lose` branch (Arkin: "magbasa muna tayo ng mga
+  tala…"). The `endBattle` hook then restores the party, because the engine only
+  revives to 1 HP and those `If Lose` branches never heal.
+- `quizdone` receives both the total and the pass threshold
+  (`PalSupport quizdone <total> <pass>`), so the data and the plugin can never
+  disagree. A missing threshold defaults to half the questions.
 
 > **The `Game Over` trap.** `Troops.json` troop 1 has two `Game Over` event
 > commands (L125/L132) on the *final* question's wrong answers. They fire
@@ -174,9 +211,9 @@ gauge, `Pahiwatig n/N`, `Kendi <points>`, and a `Tama / Mali / %` tally.
 > `21885e1`.
 
 This is strictly better than before: no invisible-command-window state, no dead
-party on the map, and no change to the win condition.
+party on the map, and no early end to the quiz.
 
-### 4.4 Map HUD
+### 4.5 Map HUD
 
 `Window_MapCompanionHUD` now shows `Kendi <points>` on the name row and
 `<Rank> HP` above Arkin's gauge, refreshing when points or rank change. No window
@@ -219,7 +256,7 @@ Item 6 (`candy`): icon 87, Filipino description, non-consumable, `occasion: 3`
 | File | Change |
 |---|---|
 | `js/plugins/PalSupport.js` | **new** — feedback, points, support, ranks, outcome |
-| `js/plugins/PalQuiz.js` | **new** — in-memory shuffle + validation |
+| `js/plugins/PalQuiz.js` | **new** — in-memory shuffle, damage curve, validation |
 | `js/plugins/MapStatusWindow_Reworked.js` | candy counter + rank label |
 | `js/plugins.js` | BattleHUD score vars `1/2 → 3/4`; register the two plugins after BattleHUD |
 | `data/Items.json` | item 6 metadata (one line changed) |
@@ -227,6 +264,7 @@ Item 6 (`candy`): icon 87, Filipino description, non-consumable, `occasion: 3`
 | `data/Troops.json` | **unchanged, byte-identical to `21885e1`** |
 | `tools/verify_shuffle.js` | **new** — 3 000-permutation fuzz over the real troop data |
 | `tools/simulate_support.js` | **new** — headless MV runtime scenario tests |
+| `tools/simulate_battle.js` | **new** — enumerates every answer path, checks control flow and the damage curve |
 | `data/_backup/*` | inert pre-panel snapshots (`DataManager` only reads `data/<Name>.json`) |
 
 ---
@@ -236,6 +274,7 @@ Item 6 (`candy`): icon 87, Filipino description, non-consumable, `occasion: 3`
 ```bash
 node tools/verify_shuffle.js 500     # 3000 permutations, 0 failures
 node tools/simulate_support.js       # ALL CHECKS PASSED
+node tools/simulate_battle.js        # 7344 answer paths, 0 failures
 ```
 
 `verify_shuffle.js` proves, for every permutation of every troop:
@@ -263,6 +302,25 @@ node tools/simulate_support.js       # ALL CHECKS PASSED
   on disk is unchanged
 - `Conversation_Count` / `Material_Count` are never touched
 
+`simulate_battle.js` proves, for all 7344 answer combinations across the six
+quiz battles (one fixed shuffle per battle, as in play):
+
+- every path terminates, asks each question once, fires `quizdone` once
+- no `Game Over` command is left to execute
+- the enemy takes damage **only** on correct answers, and always the planned
+  amount
+- the enemy **never** dies mid-quiz, so all questions are always asked
+- `quizdone` carries the right total and pass threshold
+- every score from `0` to `n` is reachable
+- one wrong answer costs `10 %` of the frailest member's HP, so it can never
+  cause a knockout
+
+| Troop | Questions | Damage/correct | Answers to pass | Max enemy damage | Damage/all-wrong |
+|---|---|---|---|---|---|
+| 1, 2 | 3 | 33 | 2 | 99/100 | 30/100 |
+| 3, 5, 6 | 7 | 14 | 4 | 98/100 | 70/100 |
+| 4 | 6 | 16 | 3 | 96/100 | 60/100 |
+
 ---
 
 ## 8. Rollback
@@ -273,7 +331,8 @@ git revert <commit>                # undo one step
 
 # disable at runtime without a rebuild
 # S30 ON  = no shuffling
-# S31 ON  = no points/support/feedback
+# S31 ON  = no points/support/feedback (PalQuiz then keeps the authored
+#           damage, so the battle still ends)
 ```
 
 `Troops.json` needs no backup — it is never modified.
@@ -289,7 +348,8 @@ These need the actual game window; the harness cannot render or read input.
 2. Each of the six bosses: completes, card shows `Kendi`, support gauge, tally.
 3. Replay a boss three times → three different orders; no repeats inside one run.
 4. Answer everything wrong → `KULANG PA`, Arkin's "magbasa muna tayo" line, and
-   the party is alive on the map afterwards.
+   the party is alive on the map afterwards. Each wrong answer should take a
+   small, equal slice of HP — never knock anyone out in one hit.
 5. Lose seven answers' worth of support → card reads `WALA`, the hint option
    refuses ("Naubos na ang aking mga tala").
 6. Reach 100 points → rank badge flips to `GABAY`.
