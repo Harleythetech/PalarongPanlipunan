@@ -401,6 +401,30 @@ Window_MapStatusHUD.prototype.drawMiniFace = function (actor, x, y, dw, dh) {
 //=============================================================================
 // Window 2: Companion Status Window
 //=============================================================================
+// PalSupport variable ids, read from the plugin parameters so they only have
+// to be configured in one place.
+var PalSupportVars = (function () {
+  var p = {};
+  try { p = PluginManager.parameters('PalSupport') || {}; } catch (e) { p = {}; }
+  var n = function (key, fallback) {
+    var v = Number(p[key]);
+    return isNaN(v) || p[key] === undefined ? fallback : v;
+  };
+  return { points: n('pointsVarId', 5), rank: n('rankVarId', 9) };
+})();
+
+function palCandyPoints() {
+  try { return Math.max(0, Number($gameVariables.value(PalSupportVars.points)) || 0); }
+  catch (e) { return 0; }
+}
+
+function palRankName() {
+  var ranks = ["Kasama", "Gabay", "Sandigan", "Katuwang"];
+  var r = 1;
+  try { r = Number($gameVariables.value(PalSupportVars.rank)) || 1; } catch (e) { r = 1; }
+  return ranks[Math.max(0, Math.min(ranks.length - 1, r - 1))];
+}
+
 function Window_MapCompanionHUD() {
   this.initialize.apply(this, arguments);
 }
@@ -448,7 +472,9 @@ Window_MapCompanionHUD.prototype.update = function () {
     if (this.isOpen()) this.close();
     return;
   }
-  if (comp.hp !== this._lastHp) {
+  if (comp.hp !== this._lastHp ||
+      palCandyPoints() !== this._lastPoints ||
+      palRankName() !== this._lastRank) {
     this.refresh();
   }
 };
@@ -460,6 +486,8 @@ Window_MapCompanionHUD.prototype.refresh = function () {
   if (!comp) return;
 
   this._lastHp = comp.hp;
+  this._lastPoints = palCandyPoints();
+  this._lastRank = palRankName();
 
   var w = this.contents.width;
   var h = this.contents.height;
@@ -525,16 +553,17 @@ Window_MapCompanionHUD.prototype.refresh = function () {
   this.changeTextColor(this.hpColor(comp));
   this.drawText(comp.name(), faceOffset2, nameY2, contentW2 - 52, "left");
 
-  // "Kasama" label — right-aligned on the name row
+  // Candy Points — replaces the fixed role label so the reward is visible
+  // on the map as well as in battle.
   this.changeTextColor(this.systemColor());
   this.contents.fontSize = gaugeLblH2;
-  this.drawText("Kasama", faceOffset2 + contentW2 - 54, nameY2 + 2, 54, "right");
+  this.drawText("Kendi " + palCandyPoints(), faceOffset2 + contentW2 - 64, nameY2 + 2, 64, "right");
 
   // HP gauge
   this.drawCustomHudBar(
     faceOffset2, hpY2, contentW2, gaugeH2,
     comp.hp, comp.mhp,
-    this.textColor(20), this.textColor(21), TextManager.hpA
+    this.textColor(20), this.textColor(21), palRankName() + " " + TextManager.hpA
   );
 };
 
